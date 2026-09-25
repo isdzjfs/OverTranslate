@@ -187,7 +187,7 @@ OverTranslate 目前提供了五种翻译功能，可依不同使用场景快速
 | 服务 | 说明 |
 |------|------|
 | Google 翻译（RPC） | 新版 RPC 接口 |
-| Google 翻译（Web） | 传统 Web 接口 |
+| Google 翻译（Google2） | 与 ReVanced 相同的 translateHtml 接口；不提供词典或检测到的源语言 |
 | Bing 翻译 | 翻译质量佳 |
 | Microsoft 翻译 | **（默认）** 稳定性佳、响应速度快 |
 | DeepL | 需到 DeepL 官方注册并获取 API Key |

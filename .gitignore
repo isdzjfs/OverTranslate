@@ -20,6 +20,7 @@ packages/
 project.lock.json
 project.fragment.lock.json
 artifacts/
+tools/.cache/
 .test-artifacts/
 
 # 個人的權限允許清單，不是專案設定

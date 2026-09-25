@@ -396,8 +396,8 @@
     <!-- ── Translation providers ──
          Names as well as hints: "Google 翻譯" is the product's Chinese name, not a label we
          invented, and it reads wrong on an English interface. -->
-    <sys:String x:Key="S.Provider.Google">Google 翻譯 (Web)</sys:String>
-    <sys:String x:Key="S.Provider.GoogleHint">傳統 Web 介面</sys:String>
+    <sys:String x:Key="S.Provider.Google">Google 翻譯 (Google2)</sys:String>
+    <sys:String x:Key="S.Provider.GoogleHint">與 ReVanced 相同的 translateHtml 介面</sys:String>
     <sys:String x:Key="S.Provider.Google2">Google 翻譯 (RPC)</sys:String>
     <sys:String x:Key="S.Provider.Google2Hint">新版 RPC 介面</sys:String>
     <sys:String x:Key="S.Provider.Bing">Bing 翻譯</sys:String>

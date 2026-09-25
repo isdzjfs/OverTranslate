@@ -24,90 +24,16 @@ internal readonly record struct TranslationRequestChunk(
     string Text, TranslationChunkBoundary BoundaryAfter);
 
 /// <summary>
-/// Cuts a text too long for one request into pieces the free endpoints will accept, at the best
-/// boundary each piece can reach.
+/// Splits long text at sentence or whitespace boundaries before an endpoint request.
+/// Microsoft and Bing need the conservative default limit; other providers can choose a
+/// different limit or use the pieces as items in a batch.
 /// </summary>
-/// <remarks>
-/// <para>Microsoft and Bing refuse more than a thousand characters, and GTranslate refuses the call
-/// before it leaves the machine. Both Google endpoints accept far more — 3,000 was translated
-/// complete and in order, every sentence accounted for. So this exists to keep the two engines that
-/// have a limit usable, not because the other two need protecting from long text.</para>
-///
-/// <para>That matters more than it sounds. A block goes to whichever engine answers first, and when
-/// a text is too long for Microsoft and Bing they both fail instantly, leaving Google as the only
-/// engine that can serve it. That is how a 1,181-character paragraph came back with its last
-/// sentence replaced by "僅在 GPU 10 秒上實現了 GPU 10 秒）" repeated seven times: not because it was
-/// long, but because losing two engines to the limit forced it onto a third that mistranslates that
-/// particular sentence. Split, it fits, Microsoft serves it, and it comes back right.</para>
-///
-/// <para>What this does NOT fix: Google loops on that sentence at any length — sent alone, 270
-/// characters, it fails identically. Bisecting it clause by clause found what actually triggers it,
-/// and it is not something this could act on:</para>
-///
-/// <code>
-/// In terms of speed, PP-OCRv6_medium achieves 5.2× speedup over PP-OCRv5_server on Intel Xeon CPU
-/// with OpenVINO (1.40s vs 7.30s), the tiny tier reaches 6.1× speedup on Apple M4 (0.96s vs 5.82s),
-/// and only 0.13s on A100 GPU.
-/// </code>
-///
-/// <para>Three parallel clauses in one sentence, 221 characters. Clauses one and two together are
-/// fine, two and three together are fine, all three loop. Ending the sentence before the third
-/// clause fixes it, as does removing the bracketed timings. The same shape with hotel prices
-/// instead of benchmarks does not loop at all, so it is not structural either. Both Google
-/// endpoints return the same broken answer byte for byte on repeated attempts, while Bing and
-/// Microsoft translate it correctly.</para>
-///
-/// <para>So it is a property of somebody else's model, with no rule this side could apply in
-/// advance. Catching it on the way back instead — measuring the answer for repetition and handing
-/// the block to another engine — was built and measured and then deliberately not kept: the fault
-/// is Google's, the check would run on every translation the application ever makes, and paying for
-/// that everywhere to cover one endpoint's behaviour was not judged worth it. The record is here so
-/// the next person to meet it knows what it is rather than diagnosing it again; the reproduction is
-/// the sentence above, through <c>OcrHarness --xlate-line</c>.</para>
-///
-/// <para>The limit became reachable when a wrapped paragraph started going up as one request
-/// instead of seven, which is the point of grouping and worth keeping. So it is answered where it
-/// belongs — at the transport that has it — rather than by making the grouper translate less
-/// context than the picture supports. Grouping decides what belongs together; this decides how much
-/// of it an endpoint can be handed at once, and the two stay independent.</para>
-/// </remarks>
 internal static class TranslationRequestChunks
 {
-    /// <summary>
-    /// Where Microsoft and Bing start refusing, measured. Nothing is ever sent up to this — see
-    /// <see cref="SafeMaxCharacters"/>, which is the limit every request actually uses.
-    /// </summary>
-    /// <remarks>
-    /// <para>Deliberately referenced by no code in this class. It exists so the margin below it can
-    /// be asserted rather than left as a bare number a later reader has to take on trust: raise
-    /// <see cref="SafeMaxCharacters"/> towards this and a test fails and says why. Removing it as
-    /// unused would take that check with it.</para>
-    ///
-    /// <para>It is the limit of two engines and not of four. Both Google endpoints have no
-    /// client-side limit at all — 3,000 characters was accepted and translated complete. What makes
-    /// 1,000 matter anyway is that a block goes to whichever engine answers first, so a text over
-    /// it loses Microsoft and Bing together and lands on Google by default rather than by choice.</para>
-    /// </remarks>
+    /// <summary>Measured Microsoft/Bing limit; keep the default below it.</summary>
     public const int HardMaxCharacters = 1000;
 
-    /// <summary>
-    /// The most that is actually sent in one request.
-    /// </summary>
-    /// <remarks>
-    /// <para>A fifth under the hard limit, and the margin is for the limit itself rather than for
-    /// translation quality. What the endpoints count is not published — characters as .NET counts
-    /// them, encoded bytes, or something else again — so a text measured at 999 here could still be
-    /// over on the wire, and the failure mode is losing two of the three engines at once. These are
-    /// undocumented endpoints and the number can change without anyone being told.</para>
-    ///
-    /// <para>It is deliberately not justified by quality: clean prose came back complete from both
-    /// Google endpoints at 3,000 characters, and the sentence that loops does so at 270. Length is
-    /// not what decides whether an answer is good, and this budget should not be read as though it
-    /// were.</para>
-    ///
-    /// <para>The cost is one extra request on a text between this and the hard limit. That is cheap
-    /// against a request that fails on two engines out of three.</para>
-    /// </remarks>
+    /// <summary>Conservative piece size for endpoints with a 1,000-character limit.</summary>
     public const int SafeMaxCharacters = 800;
 
     public static List<TranslationRequestChunk> Split(string text, int limit = SafeMaxCharacters)

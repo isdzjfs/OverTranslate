@@ -11,12 +11,12 @@ namespace OverTranslate.Tests;
 public class DictionaryLookupTests
 {
     [Theory]
-    [InlineData(TranslationProvider.Google, "EN-US", "Google:EN-US:False")]
+    [InlineData(TranslationProvider.Google, "EN-US", "")]
     [InlineData(TranslationProvider.Google2, "EN-US", "")]
     [InlineData(TranslationProvider.Microsoft, "EN-US", "Microsoft:EN-US:False")]
     [InlineData(TranslationProvider.Bing, "EN-US", "Bing:EN-US:False")]
     [InlineData(TranslationProvider.DeepL, "EN-US", "")]
-    [InlineData(TranslationProvider.Google, "ZH-HANT", "Google:ZH-HANT:False")]
+    [InlineData(TranslationProvider.Google, "ZH-HANT", "")]
     [InlineData(TranslationProvider.Google2, "ZH-HANT", "")]
     [InlineData(TranslationProvider.Microsoft, "ZH-HANT", "Microsoft:ZH-HANS:True")]
     [InlineData(TranslationProvider.Bing, "ZH-HANT", "Bing:ZH-HANS:True")]
@@ -32,7 +32,6 @@ public class DictionaryLookupTests
     }
 
     [Theory]
-    [InlineData(TranslationProvider.Google)]
     [InlineData(TranslationProvider.Microsoft)]
     [InlineData(TranslationProvider.Bing)]
     public void Traditional_Chinese_source_is_simplified_only_for_Microsoft_and_Bing(

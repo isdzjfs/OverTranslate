@@ -35,7 +35,7 @@ public class TranslationService
     // Shared HttpClient so a hung free endpoint fails fast instead of stalling the whole batch.
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
 
-    private readonly GTranslateProvider _google    = new(new GoogleTranslator(Http));
+    private readonly GoogleTranslateHtmlProvider _google = new(Http);
     private readonly GTranslateProvider _google2   = new(new GoogleTranslator2(Http));
     private readonly GTranslateProvider _bing      = new(new BingTranslator(Http));
     private readonly GTranslateProvider _microsoft = new(new MicrosoftTranslator(Http));
@@ -61,7 +61,6 @@ public class TranslationService
 
     private GTranslateProvider? DictionaryProvider(TranslationProvider provider) => provider switch
     {
-        TranslationProvider.Google    => _google,
         TranslationProvider.Bing      => _bing,
         TranslationProvider.Microsoft => _microsoft,
         _                             => null,

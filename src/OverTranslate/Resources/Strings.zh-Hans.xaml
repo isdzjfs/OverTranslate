@@ -380,8 +380,8 @@
     <sys:String x:Key="S.Realtime.RetryingAfterFailure">翻译暂时失败，将持续重试：{0}</sys:String>
 
     <!-- ── Translation providers ── -->
-    <sys:String x:Key="S.Provider.Google">Google 翻译 (Web)</sys:String>
-    <sys:String x:Key="S.Provider.GoogleHint">传统 Web 接口</sys:String>
+    <sys:String x:Key="S.Provider.Google">Google 翻译 (Google2)</sys:String>
+    <sys:String x:Key="S.Provider.GoogleHint">与 ReVanced 相同的 translateHtml 接口</sys:String>
     <sys:String x:Key="S.Provider.Google2">Google 翻译 (RPC)</sys:String>
     <sys:String x:Key="S.Provider.Google2Hint">新版 RPC 接口</sys:String>
     <sys:String x:Key="S.Provider.Bing">Bing 翻译</sys:String>

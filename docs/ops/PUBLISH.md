@@ -78,14 +78,15 @@ tag **不加 `v` 前綴**（沿用本倉慣例）。觸發條件是 `[0-9]*` 或
 
 腳本用 `$PSScriptRoot` 解析相對路徑，**不看當前工作目錄**，從哪裡呼叫都可以。
 
-> **先決條件**：打包走的是自用 fork 的 vpk，不是 `dotnet tool install -g vpk` 裝的那顆
-> （為什麼見[五、啟動器 stub 已經拿掉了](#五啟動器-stub-已經拿掉了210)）。腳本預設找
-> `..\velopack\build\Release\net10.0\vpk.exe`，也就是 fork 與本倉並排 clone 的位置；
-> 放在別處就用 `-VpkPath` 指，或設環境變數 `OVERTRANSLATE_VPK_PATH`。找不到會直接失敗，
-> 不會安靜地退回官方版。
+> **先決條件**：本機需有 Git、.NET 8 SDK 與可編譯 `net10.0` 的 .NET SDK，以及 PowerShell 7。
+> 打包使用自用 fork 的 vpk，不會退回官方版（原因見[五、啟動器 stub 已經拿掉了](#五啟動器-stub-已經拿掉了210)）。
+> 腳本預設使用專案內的 `tools/.cache/velopack-fork/build/Release/net10.0/vpk.exe`。
+> 首次執行若快取不存在，會呼叫 `tools/prepare-velopack.ps1` 安裝官方 vpk 1.2.0 的 vendor、
+> clone 固定 commit 的 fork 並編譯；之後直接重用，無需再尋找工具路徑。快取在專案內但不納入版控。
+> CI 仍用 `-VpkPath` 傳入它建置的 fork；本機也可用該參數或 `OVERTRANSLATE_VPK_PATH` 覆寫。
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\publish-velopack.ps1
+pwsh -NoProfile -File .\publish-velopack.ps1
 ```
 
 - 版號取自 csproj 的 `<Version>`，或用 `-Version` 覆寫
@@ -125,7 +126,7 @@ vpk download github --repoUrl https://github.com/Hon-Lu/OverTranslate --channel 
 打包時加 `-Channel beta` 並用 `-Version` 指定帶後綴的版號：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\publish-velopack.ps1 -Channel beta -Version 2.0.0-beta.1
+pwsh -NoProfile -File .\publish-velopack.ps1 -Channel beta -Version 2.0.0-beta.1
 ```
 
 **但 CI 的 pre-release 流程已經涵蓋了它原本的用途，而且更好** ——
@@ -144,8 +145,8 @@ CI 打的是 `win` channel，你測到的就是使用者會拿到的同一批二
 > 要讓 beta 訂閱者跟上，發正式版時**兩條都打**，兩組檔案上傳到同一個 Release：
 >
 > ```powershell
-> powershell -ExecutionPolicy Bypass -File .\publish-velopack.ps1
-> powershell -ExecutionPolicy Bypass -File .\publish-velopack.ps1 `
+> pwsh -NoProfile -File .\publish-velopack.ps1
+> pwsh -NoProfile -File .\publish-velopack.ps1 `
 >     -SkipPublish -Channel beta -Version 2.0.0
 > ```
 >
@@ -363,7 +364,7 @@ CI 會把 secret 還原成暫存 `.pfx`、匯入憑證存放區、立刻刪檔�
 不帶 `-CertThumbprint` 就不簽，隨手打包不需要動到憑證：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\publish-velopack.ps1 -CertThumbprint <指紋>
+pwsh -NoProfile -File .\publish-velopack.ps1 -CertThumbprint <指紋>
 ```
 
 ### 目前這張憑證

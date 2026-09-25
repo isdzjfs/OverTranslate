@@ -16,7 +16,7 @@ internal static class DictionaryLookupPlan
     {
         // A provider without dictionary support leaves the optional dictionary panel empty.
         // Looking up another provider here would silently send the user's text elsewhere.
-        if (selectedProvider is not (TranslationProvider.Google or TranslationProvider.Microsoft or TranslationProvider.Bing))
+        if (selectedProvider is not (TranslationProvider.Microsoft or TranslationProvider.Bing))
             return null;
 
         var convertSource = sourceLanguage.Equals("ZH-HANT", StringComparison.OrdinalIgnoreCase) &&

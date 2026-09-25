@@ -86,7 +86,7 @@ $env:OVERTRANSLATE_UPDATE_PRERELEASE = "1"
 # 以 1.7.0 為例，b0bbef9 是它的 commit
 git worktree add --detach D:\wt-170 b0bbef9
 # 在 D:\wt-170 的 UpdateService.CreateManager 加上 prerelease 覆寫那幾行，然後：
-powershell -ExecutionPolicy Bypass -File .\publish-velopack.ps1 `
+pwsh -NoProfile -File .\publish-velopack.ps1 `
     -ProjectPath D:\wt-170\src\OverTranslate\OverTranslate.csproj `
     -PublishDir  D:\wt-170\src\OverTranslate\bin\Publish `
     -IconPath    D:\wt-170\src\OverTranslate\icons\icon_256.ico `

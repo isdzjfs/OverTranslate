@@ -187,7 +187,7 @@ OverTranslate은 다섯 가지 번역 기능을 제공하며, 상황에 맞는 �
 | 서비스 | 설명 |
 |------|------|
 | Google 번역(RPC) | 새 RPC 인터페이스 |
-| Google 번역(Web) | 기존 웹 인터페이스 |
+| Google 번역(Google2) | ReVanced와 동일한 translateHtml 인터페이스. 사전 및 감지된 원문 언어는 제공하지 않음 |
 | Bing 번역 | 번역 품질이 좋음 |
 | Microsoft 번역 | **(기본)** 안정적이고 응답이 빠름 |
 | DeepL | DeepL 공식 사이트에서 가입해 API 키를 받아야 합니다 |

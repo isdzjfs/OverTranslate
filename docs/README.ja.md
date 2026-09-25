@@ -187,7 +187,7 @@ OverTranslate には 5 つの翻訳機能があり、その場に合ったもの
 | サービス | 説明 |
 |------|------|
 | Google 翻訳（RPC） | 新しい RPC インターフェース |
-| Google 翻訳（Web） | 従来の Web インターフェース |
+| Google 翻訳（Google2） | ReVanced と同じ translateHtml インターフェース。辞書と検出された原文言語は提供されません |
 | Bing 翻訳 | 訳文の品質が高い |
 | Microsoft 翻訳 | **（既定）** 安定していて応答も速い |
 | DeepL | DeepL の公式サイトで登録して API キーを取得する必要があります |

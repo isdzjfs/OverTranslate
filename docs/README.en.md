@@ -184,7 +184,7 @@ built-in text to speech (TTS) reads both the original text and the translation a
 | Service | Description |
 |---------|-------------|
 | Google Translate (RPC) | Newer RPC interface |
-| Google Translate (Web) | Traditional web interface |
+| Google Translate (Google2) | Same translateHtml endpoint as ReVanced; no dictionary or detected-source result |
 | Bing Translator | Good translation quality |
 | Microsoft Translator | **(default)** Stable and fast |
 | DeepL | Requires registering on DeepL's site and obtaining an API key |

@@ -54,7 +54,7 @@ public class GTranslateProvider : ITranslationProvider
         { "UK",      "uk"    }, { "BG",      "bg"    },
     };
 
-    private static string MapToGTranslate(string deepLCode) =>
+    internal static string MapToGTranslate(string deepLCode) =>
         ToGTranslate.TryGetValue(deepLCode, out var code) ? code : deepLCode.ToLowerInvariant().Split('-')[0];
 
     internal static string? MapSourceToGTranslate(string sourceLang) =>

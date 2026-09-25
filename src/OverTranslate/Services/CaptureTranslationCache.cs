@@ -3,7 +3,7 @@ using OverTranslate.Models;
 namespace OverTranslate.Services;
 
 /// <summary>
-/// Reuses completed Google Web translations when a screenshot contains the same OCR text again.
+/// Reuses completed Google translateHtml translations when a screenshot contains the same OCR text again.
 /// The cache is in memory only; the caller decides which provider may use it.
 /// </summary>
 internal sealed class CaptureTranslationCache

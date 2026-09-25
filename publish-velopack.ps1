@@ -16,7 +16,8 @@ param(
     [string]$Version,
     # 打包用的是 fork 版 vpk（Hon-Lu/velopack 的 fork/no-stub-1.2.0），不是 nuget 上的官方
     # 版本 —— 只有它認得 --noStub。取得與建置方式見該倉的 FORK-APPS.md。
-    # 沒給就用這台機器的慣例位置（fork 與本倉並排 clone），CI 則明確傳進來。
+    # 沒給就用專案內的工具快取；缺少時會由 tools/prepare-velopack.ps1 建置。
+    # CI 明確傳入它自己的 fork 路徑。
     [string]$VpkPath = $env:OVERTRANSLATE_VPK_PATH,
     # 自簽憑證的指紋。給了才簽，沒給就照常打包不簽——本機隨手打包不需要動到憑證。
     # CI 會先把憑證匯入存放區，再把指紋傳進來，私鑰不會出現在任何命令列上。
@@ -86,6 +87,20 @@ if (-not (Test-Path $projectFullPath)) {
     throw "找不到專案檔：$projectFullPath"
 }
 
+# Check the packer before clearing or rebuilding Publish. CI supplies its own fork;
+# a local run validates or prepares the cache kept inside this project.
+if ([string]::IsNullOrWhiteSpace($VpkPath)) {
+    $VpkPath = ".\tools\.cache\velopack-fork\build\Release\net10.0\vpk.exe"
+    & (Join-Path $PSScriptRoot "tools\prepare-velopack.ps1")
+}
+
+$vpkFullPath = Resolve-FullPath $VpkPath
+if (-not (Test-Path $vpkFullPath)) {
+    # 刻意不退回 PATH 上的官方 vpk。官方版不認得 --noStub 會直接失敗；就算拔掉那個旗標，
+    # 打出來的包就會夾著那顆未簽章的啟動器 stub —— 正是 #210 要拿掉的東西。
+    throw "找不到 fork 版 vpk：$vpkFullPath。可執行 pwsh -NoProfile -File .\tools\prepare-velopack.ps1 建置專案內快取，或用 -VpkPath 指定。"
+}
+
 if (-not $SkipPublish) {
     if (-not (Get-Command "dotnet" -ErrorAction SilentlyContinue)) {
         throw "找不到 dotnet。請先安裝 .NET SDK，或確認終端機環境變數已更新。"
@@ -136,26 +151,6 @@ if (-not $SkipPublish) {
     }
 
     Write-Host ""
-}
-
-if ([string]::IsNullOrWhiteSpace($VpkPath)) {
-    # 本機慣例：fork 與本倉並排 clone。
-    $VpkPath = "..\velopack\build\Release\net10.0\vpk.exe"
-}
-
-$vpkFullPath = Resolve-FullPath $VpkPath
-if (-not (Test-Path $vpkFullPath)) {
-    # 刻意不退回 PATH 上的官方 vpk。官方版不認得 --noStub 會直接失敗；就算拔掉那個旗標，
-    # 打出來的包就會夾著那顆未簽章的啟動器 stub —— 正是 #210 要拿掉的東西。
-    throw @"
-找不到 fork 版 vpk：$vpkFullPath
-
-取得與建置方式見 fork 的 FORK-APPS.md：裝官方 vpk 1.2.0 取它的 vendor 二進位（必須沿用官方那份，
-自己編的 Rust 產物會連帶換掉 Update.exe 的雜湊）、clone fork/no-stub-1.2.0、把 vendor 複製進去、
-dotnet build src/vpk/Velopack.Vpk -c Release -f net10.0。
-
-建好之後用 -VpkPath 指到 build/Release/net10.0/vpk.exe，或設環境變數 OVERTRANSLATE_VPK_PATH。
-"@
 }
 
 if (-not (Test-Path $publishFullPath)) {

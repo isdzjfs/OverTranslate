@@ -281,11 +281,10 @@ if (args[0] == "--xlate-line")
         return 1;
     }
 
-    // Compare all four endpoints independently; a limit measured on one says nothing about another.
+    // Compare the selectable free endpoints independently; a limit measured on one says nothing about another.
     //
-    // --raw hands each engine the whole text, bypassing TranslationRequestChunks. That is what
-    // reproduces the fault the chunking exists to prevent, so it stays available: without it the
-    // only way to see an endpoint's real behaviour past its limit is to delete the fix.
+    // --raw bypasses TranslationRequestChunks for the GTranslate engines. Google2 always keeps
+    // its own batch budget, matching the production path.
     var raw = args.Contains("--raw");
     var line2 = raw ? string.Join(' ', args.Skip(1).Where(a => a != "--raw")) : line;
     var limit = raw ? int.MaxValue : (int?)null;
@@ -293,10 +292,10 @@ if (args[0] == "--xlate-line")
     var block = new List<OcrTextBlock> { new(line2, new System.Windows.Rect(0, 0, 100, 20)) };
     Console.WriteLine($"  input: {line2.Length} chars, chunking {(raw ? "OFF" : "ON")}");
 
-    foreach (var (name, provider) in new (string, GTranslateProvider)[]
+    foreach (var (name, provider) in new (string, ITranslationProvider)[]
              {
                  ("Microsoft", new GTranslateProvider(new MicrosoftTranslator(), null, limit)),
-                 ("Google Web", new GTranslateProvider(new GoogleTranslator(), null, limit)),
+                 ("Google2   ", new GoogleTranslateHtmlProvider(new System.Net.Http.HttpClient())),
                  ("Google RPC", new GTranslateProvider(new GoogleTranslator2(), null, limit)),
                  ("Bing      ", new GTranslateProvider(new BingTranslator(), null, limit)),
              })
@@ -312,6 +311,19 @@ if (args[0] == "--xlate-line")
         }
     }
 
+    return 0;
+}
+
+if (args[0] == "--google2-check")
+{
+    var text = args.Length > 1 ? string.Join(' ', args.Skip(1)) : "Settings have been saved successfully.";
+    using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+    var provider = new GoogleTranslateHtmlProvider(http);
+    var block = new OcrTextBlock(text, new System.Windows.Rect());
+    var started = System.Diagnostics.Stopwatch.StartNew();
+    var (translated, detected) = await provider.TranslateAsync([block], "auto", "ZH-HANS", "");
+    Console.WriteLine($"Google2 translateHtml: {started.ElapsedMilliseconds} ms, detected={detected}");
+    Console.WriteLine(translated[0].TranslatedText);
     return 0;
 }
 
