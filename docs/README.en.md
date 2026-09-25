@@ -190,11 +190,7 @@ built-in text to speech (TTS) reads both the original text and the translation a
 | DeepL | Requires registering on DeepL's site and obtaining an API key |
 | OpenAI | Supports the OpenAI API format; a local LLM is recommended, which you can set up quickly with [Ollama](guides/OLLAMA_GUIDE.en.md) |
   
-An "automatic fallback" mechanism is provided (it applies to both **screenshot translation** and **real-time translation**):
-when a translation service is unavailable or responds too slowly, the app automatically switches to another available translation API, and the engine actually in use is shown in the toolbar.
-![Fallback](images/備援.png)
-
-> The fallback mechanism is not triggered when using **OpenAI**.
+**Screenshot translation** uses only the selected API and shows an error if its request fails. **Real-time translation** and **quick translation** can try another available API when Google, Bing, or Microsoft fails or responds too slowly. DeepL and OpenAI do not use automatic fallback.
 
 ### OpenAI settings
 

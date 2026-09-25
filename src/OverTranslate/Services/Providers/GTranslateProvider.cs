@@ -1,7 +1,11 @@
+using System.Diagnostics;
+using System.Net.Http;
+using System.Net.Sockets;
 using GTranslate.Results;
 using GTranslate.Translators;
 using NLog;
 using OverTranslate.Models;
+using OverTranslate.Services;
 
 namespace OverTranslate.Services.Providers;
 
@@ -80,7 +84,7 @@ public class GTranslateProvider : ITranslationProvider
         if (blocks.Count == 0) return ([], "");
         cancellationToken.ThrowIfCancellationRequested();
 
-        var tasks   = blocks.Select(b => TranslateOneAsync(b.Text, sourceLang, targetLang, cancellationToken));
+        var tasks   = blocks.Select((b, i) => TranslateOneAsync(b.Text, sourceLang, targetLang, cancellationToken, i));
         var results = await Task.WhenAll(tasks);
 
         var langVotes  = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -99,14 +103,16 @@ public class GTranslateProvider : ITranslationProvider
     }
 
     // Translates a single text fragment. Detected language is returned as a DeepL-style code.
-    // Throws if the underlying free endpoint fails — the caller (ResilientProvider) decides on fallback.
+    // Throws if the underlying free endpoint fails; the caller decides whether to show the error
+    // or try a backup engine.
     //
     // GTranslate's ITranslator.TranslateAsync takes no CancellationToken, so a request already in
     // flight cannot be aborted. The token is honoured at the only point where it still helps: before
     // the call is made. That is what keeps an abandoned batch from issuing the requests it has not
     // started yet, including every hedged backup ResilientProvider would have launched.
     public async Task<(string Translation, string DetectedLang)> TranslateOneAsync(
-        string text, string sourceLang, string targetLang, CancellationToken cancellationToken = default)
+        string text, string sourceLang, string targetLang, CancellationToken cancellationToken = default,
+        int blockIndex = -1)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -123,7 +129,9 @@ public class GTranslateProvider : ITranslationProvider
         var chunks = TranslationRequestChunks.Split(text, _safeInputLimit);
         if (chunks.Count == 1)
         {
-            var single  = await _translator.TranslateAsync(text, toCode, fromCode);
+            var single  = await TranslateMeasuredAsync(
+                () => _translator.TranslateAsync(text, toCode, fromCode),
+                blockIndex, 1, 1, text.Length, cancellationToken);
             var oneLang = single.SourceLanguage?.ISO6391 ?? "";
             return (single.Translation, string.IsNullOrEmpty(oneLang) ? "" : MapDetectedToDeepL(oneLang));
         }
@@ -140,11 +148,14 @@ public class GTranslateProvider : ITranslationProvider
 
         // One at a time, never in parallel: these are keyless endpoints, and a burst of requests
         // from one machine is what throttling is for.
-        foreach (var chunk in chunks)
+        for (int i = 0; i < chunks.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var part = await _translator.TranslateAsync(chunk.Text, toCode, fromCode);
+            var chunk = chunks[i];
+            var part = await TranslateMeasuredAsync(
+                () => _translator.TranslateAsync(chunk.Text, toCode, fromCode),
+                blockIndex, i + 1, chunks.Count, chunk.Text.Length, cancellationToken);
             translations.Add(part.Translation);
             // The first chunk that names a language speaks for the block; the rest are the same
             // text and a later disagreement is a shorter piece being read with less to go on.
@@ -153,6 +164,57 @@ public class GTranslateProvider : ITranslationProvider
 
         var mapped = string.IsNullOrEmpty(detected) ? "" : MapDetectedToDeepL(detected);
         return (TranslationRequestChunks.Join(chunks, translations), mapped);
+    }
+
+    private async Task<T> TranslateMeasuredAsync<T>(
+        Func<Task<T>> request, int blockIndex, int chunkIndex, int chunkCount, int length,
+        CancellationToken cancellationToken)
+    {
+        // Only screenshot translation gets these per-call Info logs. Real-time translation can
+        // issue many short calls, and logging every one would drown out the screenshot diagnosis.
+        if (CaptureTranslationDiagnostics.RequestId is not long requestId)
+            return await request();
+
+        var started = Stopwatch.GetTimestamp();
+        Log.Info("Capture translation {RequestId} engine-call started engine={Engine} block={Block} chunk={Chunk}/{ChunkCount} chars={Length}",
+            requestId, Name, blockIndex, chunkIndex, chunkCount, length);
+        try
+        {
+            var result = await request();
+            Log.Info("Capture translation {RequestId} engine-call completed engine={Engine} block={Block} chunk={Chunk}/{ChunkCount} elapsedMs={ElapsedMs}",
+                requestId, Name, blockIndex, chunkIndex, chunkCount,
+                (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            int? httpStatus = null;
+            string? httpRequestError = null;
+            string? socketError = null;
+            var rootCause = ex;
+            for (Exception? current = ex; current is not null; current = current.InnerException)
+            {
+                rootCause = current;
+                if (current is HttpRequestException http)
+                {
+                    httpRequestError ??= http.HttpRequestError.ToString();
+                    if (http.StatusCode is { } status)
+                        httpStatus ??= (int)status;
+                }
+                if (current is SocketException socket)
+                    socketError ??= socket.SocketErrorCode.ToString();
+            }
+
+            // Exception messages and request bodies can contain recognised screen text. Keep the
+            // default log limited to safe types/status codes; the full exception stays opt-in Debug.
+            Log.Warn("Capture translation {RequestId} engine-call failed engine={Engine} block={Block} chunk={Chunk}/{ChunkCount} elapsedMs={ElapsedMs} exception={ExceptionType} rootCause={RootCause} httpStatus={HttpStatus} httpError={HttpError} socketError={SocketError} cancelled={Cancelled}",
+                requestId, Name, blockIndex, chunkIndex, chunkCount,
+                (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                ex.GetType().Name, rootCause.GetType().Name,
+                httpStatus?.ToString() ?? "none", httpRequestError ?? "none",
+                socketError ?? "none", cancellationToken.IsCancellationRequested);
+            throw;
+        }
     }
 
     public async Task<DictionaryLookupData?> LookupDictionaryAsync(

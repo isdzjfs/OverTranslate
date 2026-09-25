@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Forms;
 using System.Windows.Interop;
@@ -19,6 +20,7 @@ namespace OverTranslate.Views;
 public partial class MainWindow : Window
 {
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
+    private static long _nextCaptureTranslationId;
 
     private NotifyIcon? _notifyIcon;
     private TrayMenuWindow? _trayMenu;
@@ -888,6 +890,14 @@ public partial class MainWindow : Window
         }
 
         requestToolbar?.SetBusy(true);
+        var requestId = Interlocked.Increment(ref _nextCaptureTranslationId);
+        using var diagnosticScope = CaptureTranslationDiagnostics.Begin(requestId);
+        var totalTimer = Stopwatch.StartNew();
+        var stageStarted = Stopwatch.GetTimestamp();
+        var stage = "prepare";
+        var outcome = "interrupted";
+        Log.Info("Capture translation {RequestId} started engine={Engine} source={Source} target={Target}",
+            requestId, settings.Provider, req.SourceLang, req.TargetLang);
 
         // Whether the frame may still be handed back: this run is what locked it, and recognition —
         // the one stage a redrawn box would fix — has not got past finding text yet. Cleared the
@@ -899,6 +909,7 @@ public partial class MainWindow : Window
         {
             if (requestCaptureWindow == null || !requestCaptureWindow.PrepareForProcessing(out frameStillRestorable))
             {
+                outcome = "no-image";
                 ShowBalloon(
                     LocalizationService.Get("S.Main.RecogniseFailedTitle"),
                     LocalizationService.Get("S.Main.NoImageBody"), selRect);
@@ -926,18 +937,27 @@ public partial class MainWindow : Window
                 _lastSelPhysHeight,
                 LocalizationService.Get("S.Main.Translating"));
 
+            Log.Info("Capture translation {RequestId} stage=prepare elapsedMs={ElapsedMs} image={Width}x{Height}",
+                requestId, (int)Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds,
+                workBitmap.Width, workBitmap.Height);
+            stage = "ocr";
+            stageStarted = Stopwatch.GetTimestamp();
             var recognizedBlocks = await AppServices.Ocr.RecognizeAsync(
                 workBitmap,
                 req.SourceLang,
                 cancellationToken,
                 req.IsVerticalText,
                 CaptureLayoutPolicy.ForApplication(req.LayoutMode));
+            Log.Info("Capture translation {RequestId} stage=ocr elapsedMs={ElapsedMs} blocks={Blocks}",
+                requestId, (int)Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds,
+                recognizedBlocks.Count);
             if (!IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow))
                 return;
 
             _lastOcrBlocks = recognizedBlocks;
             if (_lastOcrBlocks.Count == 0)
             {
+                outcome = "no-text";
                 requestToolbar?.SetTranslationState(false);
                 if (frameStillRestorable) requestCaptureWindow.RestoreSelectionEditing();
                 ShowBalloon(
@@ -958,13 +978,21 @@ public partial class MainWindow : Window
             // Recognition is available even while translation is still pending.
             _overlayWindow?.ShowOcrDebug(_lastOcrBlocks, _lastSelPhysLeft, _lastSelPhysTop);
 
+            // A capture uses only the selected engine; its failure is shown by the handler below.
+            stage = "translation";
+            stageStarted = Stopwatch.GetTimestamp();
             var (translated, _) = await AppServices.Translation.TranslateAsync(
                 _lastOcrBlocks, req.SourceLang, req.TargetLang, settings.ApiKey,
-                cancellationToken: cancellationToken);
+                resilient: false, cancellationToken: cancellationToken);
+            Log.Info("Capture translation {RequestId} stage=translation elapsedMs={ElapsedMs} blocks={Blocks}",
+                requestId, (int)Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds,
+                translated.Count);
             if (!IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow))
                 return;
 
             _lastTranslatedBlocks = [.. translated];
+            stage = "placement";
+            stageStarted = Stopwatch.GetTimestamp();
 
             // Between the translation and the colour sampling, and it has to be exactly here.
             // Placement is what decides the boxes the overlay will draw, and a colour sampled from
@@ -998,15 +1026,24 @@ public partial class MainWindow : Window
                     return b with { BackgroundColor = bg, TextColor = fg };
                 })
                 .ToList();
+            Log.Info("Capture translation {RequestId} stage=placement elapsedMs={ElapsedMs} blocks={Blocks}",
+                requestId, (int)Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds,
+                coloredTranslated.Count);
 
             // Off the UI thread: this repairs the whole capture once, for every bubble that is
             // about to be drawn over it. Null on failure, and the overlay then paints flat colour.
+            stage = "backdrop";
+            stageStarted = Stopwatch.GetTimestamp();
             var backdrop = await Task.Run(
                 () => CaptureBubbleBackdrop.Create(workBitmap, coloredTranslated, cancellationToken),
                 cancellationToken);
+            Log.Info("Capture translation {RequestId} stage=backdrop elapsedMs={ElapsedMs}",
+                requestId, (int)Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds);
             if (!IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow))
                 return;
 
+            stage = "display";
+            stageStarted = Stopwatch.GetTimestamp();
             _lastColoredBlocks = coloredTranslated;
             _lastVerticalText = req.IsVerticalText;
             _lastBackdrop = backdrop;
@@ -1023,16 +1060,20 @@ public partial class MainWindow : Window
                 backdrop);
             requestToolbar?.SetTranslationState(true);
             requestToolbar?.SetToggleEnabled(coloredTranslated.Count > 0);
-            requestToolbar?.SetEngineBadge(AppServices.Translation.LastEngineUsage);
+            Log.Info("Capture translation {RequestId} stage=display elapsedMs={ElapsedMs}",
+                requestId, (int)Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds);
+            outcome = "success";
         }
         // The session was torn down (Esc, re-capture, toolbar close) while this was in flight.
         // Expected and user-initiated — it must stay completely silent, with no error toast.
         catch (OperationCanceledException)
         {
+            outcome = "cancelled";
             Log.Debug("Translate request abandoned — capture session ended");
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("sequence contains no elements", StringComparison.OrdinalIgnoreCase))
         {
+            outcome = "no-text";
             Log.Debug(ex, "OCR produced no text blocks");
             if (!IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow))
                 return;
@@ -1045,8 +1086,11 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "Translate request failed (src={Src}, tgt={Tgt}, selection={Sel})",
-                req.SourceLang, req.TargetLang, selRect);
+            outcome = "failed";
+            Log.Error("Capture translation {RequestId} failed stage={Stage} stageElapsedMs={StageElapsedMs} exception={ExceptionType}",
+                requestId, stage, (int)Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds,
+                ex.GetType().Name);
+            Log.Debug(ex, "Capture translation {RequestId} exception details", requestId);
             if (!IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow))
                 return;
 
@@ -1070,6 +1114,9 @@ public partial class MainWindow : Window
         }
         finally
         {
+            Log.Info("Capture translation {RequestId} finished outcome={Outcome} stage={Stage} stageElapsedMs={StageElapsedMs} totalMs={ElapsedMs}",
+                requestId, outcome, stage, (int)Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds,
+                (int)totalTimer.Elapsed.TotalMilliseconds);
             if (IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow))
             {
                 _overlayWindow?.RestoreIdle(_lastColoredBlocks.Count > 0);

@@ -99,15 +99,9 @@ public class TranslationService
     /// <summary>Whether a specific engine needs an API key, for a caller that chose its own.</summary>
     public bool ProviderRequiresApiKey(TranslationProvider provider) => Resilient(provider).RequiresApiKey;
 
-    /// <summary>
-    /// Which engine(s) actually served the most recent translation. Null for providers that have
-    /// no fallback concept (e.g. DeepL), so the UI can keep the engine badge hidden.
-    /// </summary>
-    public EngineUsage? LastEngineUsage { get; private set; }
-
     /// <param name="resilient">
     /// true (default) uses the hedged/fallback provider; false sends to the single chosen engine only,
-    /// so a timeout/failure throws straight to the caller (used by the manual translation window).
+    /// so a timeout/failure throws straight to the caller (used by screenshot and manual translation).
     /// </param>
     /// <param name="engine">
     /// Which engine to send to, or null to use the shared preference. 即時翻譯 passes its own: that
@@ -122,7 +116,6 @@ public class TranslationService
         var chosen   = engine ?? Saved;
         var provider = resilient ? Resilient(chosen) : Single(chosen);
         var result   = await provider.TranslateAsync(blocks, sourceLang, targetLang, apiKey, cancellationToken);
-        LastEngineUsage = (provider as ResilientProvider)?.LastUsage;
         return result;
     }
 

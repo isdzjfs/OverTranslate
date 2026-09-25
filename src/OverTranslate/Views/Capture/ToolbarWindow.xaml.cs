@@ -6,7 +6,6 @@ using System.Windows.Threading;
 using OverTranslate.Models;
 using OverTranslate.Services;
 using OverTranslate.Services.Ocr;
-using OverTranslate.Services.Providers;
 
 namespace OverTranslate.Views.Capture;
 
@@ -468,7 +467,6 @@ public partial class ToolbarWindow : Window
     private void SetBusy(bool busy, string busyLabelKey)
     {
         _isBusy = busy;
-        if (busy) HideEngineBadge(); // stale badge shouldn't linger while the next batch runs
         TranslateBtn.IsEnabled = !busy;
         TranslateLabel.Text = LocalizationService.Get(
             busy ? busyLabelKey
@@ -564,31 +562,6 @@ public partial class ToolbarWindow : Window
         !hasTranslated
             ? CopyTextKind.RecognizeSource
             : bubblesVisible ? CopyTextKind.Translation : CopyTextKind.Source;
-
-    /// <summary>
-    /// Shows a compact amber badge with engine details in its tooltip — but only when a
-    /// backup engine was used (the user's chosen primary couldn't serve everything). Stays hidden on
-    /// normal runs and for providers without fallback (e.g. DeepL), so it never nags during use.
-    /// </summary>
-    public void SetEngineBadge(EngineUsage? usage)
-    {
-        if (usage is null || !usage.FallbackUsed)
-        {
-            HideEngineBadge();
-            return;
-        }
-
-        EngineBadgeText.Text = LocalizationService.Get("S.Toolbar.BackupBadge");
-        EngineBadge.ToolTip = LocalizationService.Format(
-            "S.Toolbar.BackupTooltip", usage.Primary, usage.BackupEngine, usage.Summary);
-        EngineBadge.Visibility = Visibility.Visible;
-    }
-
-    private void HideEngineBadge()
-    {
-        EngineBadge.Visibility = Visibility.Collapsed;
-        EngineBadge.ToolTip    = null;
-    }
 
     public void SetToggleEnabled(bool enabled)
     {
