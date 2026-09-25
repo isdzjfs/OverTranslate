@@ -92,6 +92,99 @@ public class GoogleTranslateHtmlProviderTests
             translated.Select(block => block.TranslatedText));
     }
 
+    [Fact]
+    public async Task Auto_source_retries_a_mixed_sentence_when_google_leaves_its_long_latin_clause_untranslated()
+    {
+        const string source = "The suggestion chips of the player's Gemini bottom sheet (总结视频 / 推荐相关内容 / server &#x20;";
+        using var handler = new MixedLanguageHandler();
+        using var http = new HttpClient(handler);
+        var provider = new GoogleTranslateHtmlProvider(http);
+
+        var (translated, _) = await provider.TranslateAsync(
+            [new OcrTextBlock(source, new System.Windows.Rect())], "AUTO", "ZH-HANS", "");
+
+        Assert.Equal("播放器的 Gemini 底部面板的建议选项（总结视频 / 推荐相关内容 / 服务器 &#x20;",
+            translated.Single().TranslatedText);
+        Assert.Equal(new[] { "auto", "auto", "en" }, handler.Sources);
+        Assert.Equal(source.Replace("&", "&amp;").Replace("'", "&apos;"), handler.Texts[0]);
+        Assert.Equal("The suggestion chips of the player's Gemini bottom sheet".Replace("'", "&apos;"),
+            handler.Texts[1]);
+        Assert.Equal(handler.Texts[0], handler.Texts[2]);
+    }
+
+    [Fact]
+    public async Task Auto_source_does_not_retry_chinese_prose_with_a_short_english_term()
+    {
+        using var handler = new RecordingHandler("[[\"这个 API 要怎么用\"],[\"zh-CN\"]]");
+        using var http = new HttpClient(handler);
+        var provider = new GoogleTranslateHtmlProvider(http);
+
+        var (translated, _) = await provider.TranslateAsync(
+            [new OcrTextBlock("这个 API 要怎么用", new System.Windows.Rect())], "AUTO", "ZH-HANS", "");
+
+        Assert.Equal("这个 API 要怎么用", translated.Single().TranslatedText);
+        Assert.Equal(1, handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task Auto_source_uses_the_probe_detection_for_other_latin_languages()
+    {
+        using var handler = new MixedLanguageHandler("fr");
+        using var http = new HttpClient(handler);
+        var provider = new GoogleTranslateHtmlProvider(http);
+
+        await provider.TranslateAsync(
+            [new OcrTextBlock("Les suggestions de la fiche Gemini du lecteur (总结视频 / 推荐相关内容)",
+                new System.Windows.Rect())], "AUTO", "ZH-HANT", "");
+
+        Assert.Equal(new[] { "auto", "auto", "fr" }, handler.Sources);
+    }
+
+    [Fact]
+    public async Task Failed_optional_retry_keeps_the_successful_first_response()
+    {
+        const string source = "The suggestion chips of the player's Gemini bottom sheet (总结视频 / 推荐相关内容)";
+        using var handler = new MixedLanguageHandler(failRetry: true);
+        using var http = new HttpClient(handler);
+        var provider = new GoogleTranslateHtmlProvider(http);
+
+        var (translated, _) = await provider.TranslateAsync(
+            [new OcrTextBlock(source, new System.Windows.Rect())], "AUTO", "ZH-HANS", "");
+
+        Assert.Equal(source, translated.Single().TranslatedText);
+        Assert.Equal(new[] { "auto", "auto", "en" }, handler.Sources);
+    }
+
+    private sealed class MixedLanguageHandler(string probeLanguage = "en", bool failRetry = false)
+        : HttpMessageHandler
+    {
+        public List<string> Sources { get; } = [];
+        public List<string> Texts { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
+            var source = body.RootElement[0][1].GetString()!;
+            var text = body.RootElement[0][0][0].GetString()!;
+            Sources.Add(source);
+            Texts.Add(text);
+
+            if (failRetry && source == probeLanguage)
+                return new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+
+            var response = source == probeLanguage
+                ? new object[] { new[] { "播放器的 Gemini 底部面板的建议选项（总结视频 / 推荐相关内容 / 服务器 &amp;#x20;" } }
+                : text.Contains("总结视频", StringComparison.Ordinal)
+                    ? new object[] { new[] { text }, new[] { "zh-CN" } }
+                    : new object[] { new[] { "播放器的建议选项" }, new[] { probeLanguage } };
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(response), Encoding.UTF8, "application/json")
+            };
+        }
+    }
+
     private sealed class EchoHandler : HttpMessageHandler
     {
         public int RequestCount { get; private set; }

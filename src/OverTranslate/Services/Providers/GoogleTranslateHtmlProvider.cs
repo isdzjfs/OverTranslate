@@ -25,7 +25,8 @@ public sealed class GoogleTranslateHtmlProvider(HttpClient http) : ITranslationP
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
-    private readonly record struct Item(int BlockIndex, string EncodedText);
+    private readonly record struct Item(int BlockIndex, string PlainText, string EncodedText);
+    private readonly record struct Translation(string Text, string DetectedLanguage);
 
     public bool RequiresApiKey => false;
 
@@ -47,9 +48,9 @@ public sealed class GoogleTranslateHtmlProvider(HttpClient http) : ITranslationP
 
             foreach (var chunk in TranslationRequestChunks.Split(blocks[i].Text))
             {
-                var encoded = EscapeHtml(chunk.Text.Replace('\r', ' ').Replace('\n', ' '));
+                var plain = chunk.Text.Replace('\r', ' ').Replace('\n', ' ');
                 chunksByBlock[i].Add(chunk);
-                items.Add(new Item(i, encoded));
+                items.Add(new Item(i, plain, EscapeHtml(plain)));
             }
         }
 
@@ -71,9 +72,9 @@ public sealed class GoogleTranslateHtmlProvider(HttpClient http) : ITranslationP
             }
 
             var batch = items.GetRange(start, end - start);
-            var translated = await TranslateBatchAsync(batch, from, to, cancellationToken);
+            var translated = await TranslateBatchWithMixedSourceRetryAsync(batch, from, to, cancellationToken);
             for (var i = 0; i < batch.Count; i++)
-                answersByBlock[batch[i].BlockIndex].Add(translated[i]);
+                answersByBlock[batch[i].BlockIndex].Add(translated[i].Text);
             start = end;
         }
 
@@ -88,11 +89,96 @@ public sealed class GoogleTranslateHtmlProvider(HttpClient http) : ITranslationP
                 { RunsAcross = block.RunsAcross });
         }
 
-        // translateHtml returns translated strings only. It does not report a detected language.
+        // A batch may contain different source languages. Its per-item detections are useful for
+        // the retry above but cannot honestly be returned as one detected language for the block list.
         return (result, LanguageData.IsAutomaticSource(sourceLang) ? "" : sourceLang.ToUpperInvariant());
     }
 
-    private async Task<List<string>> TranslateBatchAsync(
+    private async Task<List<Translation>> TranslateBatchWithMixedSourceRetryAsync(
+        IReadOnlyList<Item> items, string from, string to, CancellationToken cancellationToken)
+    {
+        var translations = await TranslateBatchAsync(items, from, to, cancellationToken);
+        if (from != "auto") return translations;
+
+        var candidates = new List<(int Index, string Probe)>();
+        for (var i = 0; i < items.Count; i++)
+        {
+            var translation = translations[i];
+            if (!SameLanguage(translation.DetectedLanguage, to)) continue;
+            var probe = FindLatinProse(items[i].PlainText);
+            if (probe is not null && translation.Text.Contains(probe, StringComparison.OrdinalIgnoreCase))
+                candidates.Add((i, probe));
+        }
+        if (candidates.Count == 0) return translations;
+
+        // Google's auto detector can choose the Chinese labels in a mostly English sentence and
+        // leave its English clause untouched. Probe that clause alone before choosing a source;
+        // Latin letters also belong to French, Spanish and many other languages.
+        try
+        {
+            var probeItems = candidates.Select(candidate =>
+                new Item(items[candidate.Index].BlockIndex, candidate.Probe, EscapeHtml(candidate.Probe))).ToList();
+            var probeResults = await TranslateBatchAsync(probeItems, "auto", to, cancellationToken);
+            var retryGroups = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < candidates.Count; i++)
+            {
+                var source = probeResults[i].DetectedLanguage;
+                if (source.Length == 0 || SameLanguage(source, to)) continue;
+                if (!retryGroups.TryGetValue(source, out var indexes))
+                    retryGroups[source] = indexes = [];
+                indexes.Add(candidates[i].Index);
+            }
+
+            foreach (var (source, indexes) in retryGroups)
+            {
+                var retryItems = indexes.Select(index => items[index]).ToList();
+                var retried = await TranslateBatchAsync(retryItems, source, to, cancellationToken);
+                for (var i = 0; i < indexes.Count; i++)
+                    translations[indexes[i]] = retried[i];
+            }
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested &&
+            ex is HttpRequestException or InvalidOperationException or JsonException or TaskCanceledException)
+        {
+            // A failed optional retry must not turn the successful first response into an error.
+        }
+        return translations;
+    }
+
+    private static bool SameLanguage(string first, string second) =>
+        first.Length > 0 && first.Split('-')[0].Equals(second.Split('-')[0], StringComparison.OrdinalIgnoreCase);
+
+    private static string? FindLatinProse(string text)
+    {
+        var hanCount = text.Count(c => c is >= '\u3400' and <= '\u9fff');
+        if (hanCount < 2) return null;
+
+        string? best = null;
+        var start = -1;
+        for (var i = 0; i <= text.Length; i++)
+        {
+            var allowed = i < text.Length &&
+                (text[i] is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or
+                    ' ' or '\t' or '\n' or '\r' or '\'' or '\u2019' or '-' or '.' or ',' or '!' or '?');
+            if (allowed)
+            {
+                if (start < 0) start = i;
+                continue;
+            }
+            if (start < 0) continue;
+            var span = text[start..i].Trim(' ', '\t', '\n', '\r', '\'', '\u2019', '-', '.', ',', '!', '?');
+            if (span.Length > (best?.Length ?? 0)) best = span;
+            start = -1;
+        }
+
+        if (best is null) return null;
+        var letters = best.Count(c => c is >= 'A' and <= 'Z' or >= 'a' and <= 'z');
+        var words = best.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Count(word => word.Count(c => c is >= 'A' and <= 'Z' or >= 'a' and <= 'z') >= 2);
+        return letters >= 25 && letters > hanCount * 2 && words >= 5 ? best : null;
+    }
+
+    private async Task<List<Translation>> TranslateBatchAsync(
         IReadOnlyList<Item> items, string from, string to, CancellationToken cancellationToken)
     {
         var payload = JsonSerializer.Serialize(new object[]
@@ -131,12 +217,19 @@ public sealed class GoogleTranslateHtmlProvider(HttpClient http) : ITranslationP
         if (array.GetArrayLength() != items.Count)
             throw new InvalidOperationException("Google2 returned an unexpected number of translations.");
 
-        var translations = new List<string>(items.Count);
-        foreach (var value in array.EnumerateArray())
+        var detected = document.RootElement.GetArrayLength() > 1 &&
+            document.RootElement[1].ValueKind == JsonValueKind.Array &&
+            document.RootElement[1].GetArrayLength() == items.Count
+            ? document.RootElement[1] : default;
+        var translations = new List<Translation>(items.Count);
+        for (var i = 0; i < items.Count; i++)
         {
+            var value = array[i];
             if (value.ValueKind != JsonValueKind.String)
                 throw new InvalidOperationException("Google2 returned an invalid translation value.");
-            translations.Add(WebUtility.HtmlDecode(value.GetString()!));
+            var language = detected.ValueKind == JsonValueKind.Array &&
+                detected[i].ValueKind == JsonValueKind.String ? detected[i].GetString()! : "";
+            translations.Add(new Translation(WebUtility.HtmlDecode(value.GetString()!), language));
         }
         return translations;
     }
