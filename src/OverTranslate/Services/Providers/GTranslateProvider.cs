@@ -18,10 +18,7 @@ public class GTranslateProvider : ITranslationProvider
     private readonly int _safeInputLimit;
 
     /// <param name="safeInputLimit">
-    /// The most this engine is handed in one request, or null for the shared default. Each engine
-    /// splits for itself at its own transport boundary, so one that turns out to want a smaller
-    /// budget can be given one without every other engine inheriting it — which is what would
-    /// happen if <see cref="ResilientProvider"/> split once for whichever of them answers.
+    /// The most this engine is handed in one request, or null for the shared default.
     /// </param>
     public GTranslateProvider(
         ITranslator translator,
@@ -103,14 +100,12 @@ public class GTranslateProvider : ITranslationProvider
     }
 
     // Translates a single text fragment. Detected language is returned as a DeepL-style code.
-    // Throws if the underlying free endpoint fails; the caller decides whether to show the error
-    // or try a backup engine.
+    // Throws if the selected endpoint fails, so the caller can show the error.
     //
     // GTranslate's ITranslator.TranslateAsync takes no CancellationToken, so a request already in
     // flight cannot be aborted. The token is honoured at the only point where it still helps: before
-    // the call is made. That is what keeps an abandoned batch from issuing the requests it has not
-    // started yet, including every hedged backup ResilientProvider would have launched.
-    public async Task<(string Translation, string DetectedLang)> TranslateOneAsync(
+    // the call is made. That keeps an abandoned batch from issuing requests it has not started yet.
+    private async Task<(string Translation, string DetectedLang)> TranslateOneAsync(
         string text, string sourceLang, string targetLang, CancellationToken cancellationToken = default,
         int blockIndex = -1)
     {

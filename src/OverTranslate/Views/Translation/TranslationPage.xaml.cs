@@ -335,8 +335,8 @@ public partial class TranslationPage : UserControl
     }
 
     /// <summary>
-    /// Translates the current source text with the chosen engine only (no hedge/fallback, per the
-    /// manual page's design): a timeout/failure shows an error + retry rather than switching engines.
+    /// Translates the current source text with the chosen engine only.
+    /// A timeout/failure shows an error and retry control.
     /// Guarded by a sequence id so a stale result never overwrites a newer one.
     /// </summary>
     private async Task TranslateNowAsync()
@@ -366,7 +366,7 @@ public partial class TranslationPage : UserControl
         try
         {
             var block = new OcrTextBlock(text, new Rect());
-            var (results, detected) = await _translationService.TranslateAsync([block], srcLang, tgtLang, apiKey, resilient: false);
+            var (results, detected) = await _translationService.TranslateAsync([block], srcLang, tgtLang, apiKey);
             if (seq != _seq) return;    // a newer request superseded this one — let it own the UI
 
             _detectedLang = detected ?? "";
@@ -387,7 +387,7 @@ public partial class TranslationPage : UserControl
             if (seq != _seq) return;
             SetTranslating(false);
 
-            // This page sends to the chosen engine only (resilient: false), so any failure lands
+            // This page sends to the chosen engine only, so any failure lands
             // here verbatim — and the free endpoints throw whatever their internals produce (e.g.
             // GTranslate surfacing a raw System.Text.Json parse error when Google's undocumented
             // RPC endpoint answers with something that isn't JSON). Catch everything and lead with

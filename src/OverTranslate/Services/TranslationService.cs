@@ -42,48 +42,21 @@ public class TranslationService
     private readonly DeepLProvider      _deepL     = new();
     private readonly OpenAiCompatibleProvider _openAi = new();
 
-    // Per-engine resilient wrappers: the user's choice is the primary, the other reliable
-    // keyless engines act as hedged backups so one slow/throttled endpoint can't stall the batch.
-    private readonly ResilientProvider _googleR;
-    private readonly ResilientProvider _google2R;
-    private readonly ResilientProvider _bingR;
-    private readonly ResilientProvider _microsoftR;
-
-    public TranslationService()
-    {
-        // Google2/Bing/Microsoft are the most reliable free endpoints — use them as the backup pool.
-        _google2R   = new ResilientProvider([_google2, _bing, _microsoft]);
-        _bingR      = new ResilientProvider([_bing, _google2, _microsoft]);
-        _microsoftR = new ResilientProvider([_microsoft, _google2, _bing]);
-        _googleR    = new ResilientProvider([_google, _google2, _bing]);
-    }
-
     /// <summary>
     /// The engine a caller that has not said otherwise gets: whatever the user last chose in the
     /// places that share one preference — 設定, 文字翻譯 and the capture toolbar.
     /// </summary>
     private static TranslationProvider Saved => SettingsService.Instance.Current.Provider;
 
-    // Resilient (hedged + fallback) provider for a given choice.
-    private ITranslationProvider Resilient(TranslationProvider provider) => provider switch
-    {
-        TranslationProvider.Google    => _googleR,
-        TranslationProvider.Bing      => _bingR,
-        TranslationProvider.Microsoft => _microsoftR,
-        TranslationProvider.DeepL     => _deepL,
-        TranslationProvider.OpenAI    => _openAi,
-        _                             => _google2R,
-    };
-
-    // Single chosen engine, no hedging/fallback — a timeout/failure surfaces directly to the caller.
-    private ITranslationProvider Single(TranslationProvider provider) => provider switch
+    private ITranslationProvider Selected(TranslationProvider provider) => provider switch
     {
         TranslationProvider.Google    => _google,
+        TranslationProvider.Google2   => _google2,
         TranslationProvider.Bing      => _bing,
         TranslationProvider.Microsoft => _microsoft,
         TranslationProvider.DeepL     => _deepL,
         TranslationProvider.OpenAI    => _openAi,
-        _                             => _google2,
+        _                             => throw new ArgumentOutOfRangeException(nameof(provider), provider, null),
     };
 
     private GTranslateProvider? DictionaryProvider(TranslationProvider provider) => provider switch
@@ -94,15 +67,11 @@ public class TranslationService
         _                             => null,
     };
 
-    public bool RequiresApiKey => Resilient(Saved).RequiresApiKey;
+    public bool RequiresApiKey => Selected(Saved).RequiresApiKey;
 
     /// <summary>Whether a specific engine needs an API key, for a caller that chose its own.</summary>
-    public bool ProviderRequiresApiKey(TranslationProvider provider) => Resilient(provider).RequiresApiKey;
+    public bool ProviderRequiresApiKey(TranslationProvider provider) => Selected(provider).RequiresApiKey;
 
-    /// <param name="resilient">
-    /// true (default) uses the hedged/fallback provider; false sends to the single chosen engine only,
-    /// so a timeout/failure throws straight to the caller (used by screenshot and manual translation).
-    /// </param>
     /// <param name="engine">
     /// Which engine to send to, or null to use the shared preference. 即時翻譯 passes its own: that
     /// page keeps its settings to itself, so the engine it is running with is not necessarily the
@@ -110,11 +79,11 @@ public class TranslationService
     /// did not pick.
     /// </param>
     public async Task<(List<TranslatedBlock> Blocks, string DetectedLang)> TranslateAsync(
-        List<OcrTextBlock> blocks, string sourceLang, string targetLang, string apiKey, bool resilient = true,
+        List<OcrTextBlock> blocks, string sourceLang, string targetLang, string apiKey,
         CancellationToken cancellationToken = default, TranslationProvider? engine = null)
     {
         var chosen   = engine ?? Saved;
-        var provider = resilient ? Resilient(chosen) : Single(chosen);
+        var provider = Selected(chosen);
         var result   = await provider.TranslateAsync(blocks, sourceLang, targetLang, apiKey, cancellationToken);
         return result;
     }
@@ -123,33 +92,25 @@ public class TranslationService
     /// Looks up rich dictionary data only when the caller explicitly asks for it. Normal translation,
     /// screenshot translation and realtime translation keep their existing request count and latency.
     /// </summary>
-    public Task<DictionaryLookupData?> LookupDictionaryAsync(
+    public async Task<DictionaryLookupData?> LookupDictionaryAsync(
         string text, string sourceLang, string targetLang,
         CancellationToken cancellationToken = default, TranslationProvider? engine = null)
     {
-        if (!DictionaryLookupEligibility.IsEligible(text))
-            return Task.FromResult<DictionaryLookupData?>(null);
+        if (!DictionaryLookupEligibility.IsEligible(text)) return null;
 
         var lookupText = text.Trim();
-        var attempts = DictionaryLookupPlan.Build(engine ?? Saved, sourceLang, targetLang)
-            .Select<DictionaryLookupStep, Func<CancellationToken, Task<DictionaryLookupData?>>>(step =>
-                async token =>
-                {
-                    var provider = DictionaryProvider(step.Provider);
-                    if (provider is null) return null;
+        var step = DictionaryLookupPlan.Build(engine ?? Saved, sourceLang, targetLang);
+        if (step is null) return null;
 
-                    var requestText = step.ConvertSourceToSimplified
-                        ? DictionarySimplifiedChineseConverter.Convert(lookupText)
-                        : lookupText;
-                    var result = await provider.LookupDictionaryAsync(
-                        requestText, step.SourceLanguage, step.TargetLanguage, token);
-                    if (result is null) return null;
+        var provider = DictionaryProvider(step.Provider);
+        if (provider is null) return null;
 
-                    return PrepareDictionaryResult(result, lookupText, step.ConvertToTraditional);
-                })
-            .ToList();
-
-        return DictionaryLookupFallback.TryAsync(attempts, cancellationToken);
+        var requestText = step.ConvertSourceToSimplified
+            ? DictionarySimplifiedChineseConverter.Convert(lookupText)
+            : lookupText;
+        var result = await provider.LookupDictionaryAsync(
+            requestText, step.SourceLanguage, step.TargetLanguage, cancellationToken);
+        return result is null ? null : PrepareDictionaryResult(result, lookupText, step.ConvertToTraditional);
     }
 
     internal static DictionaryLookupData PrepareDictionaryResult(

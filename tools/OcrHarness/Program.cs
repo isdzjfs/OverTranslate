@@ -108,7 +108,7 @@ if (args.Length == 0)
     Console.Error.WriteLine("                  (realtime-sized rows: the pieces, the gaps, and what the whole row reads as)");
     Console.Error.WriteLine("       OcrHarness --box-repair-rows <lang> <image.png> [more.png ...]");
     Console.Error.WriteLine("                  (what ChromaticBoxRepair measures on each row, and what it repaired)");
-    Console.Error.WriteLine("       OcrHarness --xlate-test   (network translation/resilience check, no OCR)");
+    Console.Error.WriteLine("       OcrHarness --xlate-test   (Google RPC translation check, no OCR)");
     Console.Error.WriteLine("       (add --panel / --lang KO / --size N / --det model.onnx:half to any sweep)");
     return 1;
 }
@@ -269,38 +269,6 @@ if (detectorFlag >= 0)
     Console.WriteLine($"detector: {detPath}  normalization={normalization}");
 }
 
-// Forced-fallback check: the primary engine gets a 1ms-timeout HttpClient so it always fails,
-// proving the hedge falls back to a backup engine and that the badge data (FallbackUsed/Dominant)
-// is computed correctly. No OCR / screenshot needed.
-if (args[0] == "--fallback-test")
-{
-    var samples = new List<OcrTextBlock>
-    {
-        new("Settings have been saved successfully.", new System.Windows.Rect(0, 0, 100, 20)),
-        new("Please restart the application.",        new System.Windows.Rect(0, 0, 100, 20)),
-    };
-
-    var brokenHttp = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMilliseconds(1) };
-    var resilient = new ResilientProvider(
-        [
-            new GTranslateProvider(new MicrosoftTranslator(brokenHttp)), // primary: always times out
-            new GTranslateProvider(new GoogleTranslator2()),             // backup
-            new GTranslateProvider(new BingTranslator()),                // backup
-        ],
-        hedgeDelay: TimeSpan.FromMilliseconds(200));
-
-    var (translated, _) = await resilient.TranslateAsync(samples, "EN", "ZH-HANT", "");
-    var u = resilient.LastUsage!;
-    Console.WriteLine($"FallbackUsed = {u.FallbackUsed}  (expected True)");
-    Console.WriteLine($"Primary      = {u.Primary}       (expected: Microsoft)");
-    Console.WriteLine($"BackupEngine = {u.BackupEngine}  (expected: a backup, not Microsoft)");
-    Console.WriteLine($"Summary      = {u.Summary}");
-    Console.WriteLine($"Badge would show: ⚡備援 {u.BackupEngine}");
-    foreach (var t in translated)
-        Console.WriteLine($"  ZH: {t.TranslatedText}");
-    return 0;
-}
-
 // Translate one line given on the command line. For telling an OCR problem from a translation
 // one: when a word goes missing on screen, this says whether the recogniser dropped it or the
 // translator did.
@@ -313,9 +281,7 @@ if (args[0] == "--xlate-line")
         return 1;
     }
 
-    // All four, named apart. "Google" is two different endpoints and they need not behave alike —
-    // the resilient chains use GoogleTranslator2 as a backup and GoogleTranslator as a primary, so
-    // a limit measured on one says nothing about the other.
+    // Compare all four endpoints independently; a limit measured on one says nothing about another.
     //
     // --raw hands each engine the whole text, bypassing TranslationRequestChunks. That is what
     // reproduces the fault the chunking exists to prevent, so it stays available: without it the
@@ -346,25 +312,10 @@ if (args[0] == "--xlate-line")
         }
     }
 
-    // The same text through the chain a user who picked Google actually gets: the engines above
-    // answer for themselves, this answers for the application. Which one served the block is
-    // printed with it, because "Google looped" and "Google was slow so Bing answered" produce the
-    // same good line and are not the same result — the summary is what tells them apart.
-    var googleChain = new ResilientProvider([
-        new GTranslateProvider(new GoogleTranslator(), null, limit),
-        new GTranslateProvider(new GoogleTranslator2(), null, limit),
-        new GTranslateProvider(new BingTranslator(), null, limit),
-    ]);
-
-    var (chained, _) = await googleChain.TranslateAsync(block, "EN", "ZH-HANT", "");
-    Console.WriteLine($"  [Google chain] {chained[0].TranslatedText}");
-    Console.WriteLine($"                 served by {googleChain.LastBatchSummary}");
-
     return 0;
 }
 
-// Translation-only resilience check: exercises ResilientProvider over the live free endpoints
-// and reports per-run latency. No OCR / screenshot needed.
+// Translation-only Google RPC check with per-run latency. No OCR / screenshot needed.
 if (args[0] == "--xlate-test")
 {
     var samples = new List<OcrTextBlock>
@@ -375,19 +326,15 @@ if (args[0] == "--xlate-test")
         new("Translation speed should now be more consistent.", new System.Windows.Rect(0, 0, 100, 20)),
     };
 
-    var resilient = new ResilientProvider([
-        new GTranslateProvider(new GoogleTranslator2()),
-        new GTranslateProvider(new BingTranslator()),
-        new GTranslateProvider(new MicrosoftTranslator()),
-    ]);
+    var googleRpcProvider = new GTranslateProvider(new GoogleTranslator2());
 
     for (var run = 1; run <= 3; run++)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var (translated, detected) = await resilient.TranslateAsync(samples, "EN", "ZH-HANT", "");
+        var (translated, detected) = await googleRpcProvider.TranslateAsync(samples, "EN", "ZH-HANT", "");
         sw.Stop();
         Console.WriteLine($"--- run {run}: {sw.ElapsedMilliseconds} ms (detected={detected}) ---");
-        Console.WriteLine($"  實際使用引擎: {resilient.LastBatchSummary}");
+        Console.WriteLine("  引擎: Google RPC");
         foreach (var t in translated)
             Console.WriteLine($"  EN: {t.OriginalText}\n  ZH: {t.TranslatedText}");
         Console.WriteLine();

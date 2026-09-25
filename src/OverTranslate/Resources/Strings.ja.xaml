@@ -92,7 +92,6 @@
     <sys:String x:Key="S.Error.OcrSwapTimeout">OCR モデルの切り替えのため他の認識の完了を待ちましたが、タイムアウトしました。</sys:String>
     <sys:String x:Key="S.Error.OcrImageConvert">画像を ONNX OCR が読める形式に変換できませんでした。</sys:String>
     <sys:String x:Key="S.Error.OcrModelMissing">OCR モデルファイルが見つかりません：{0}</sys:String>
-    <sys:String x:Key="S.Error.NotTranslated">未翻訳</sys:String>
 
     <!-- ── Text translation page ── -->
     <sys:String x:Key="S.Translation.Title">テキスト翻訳</sys:String>

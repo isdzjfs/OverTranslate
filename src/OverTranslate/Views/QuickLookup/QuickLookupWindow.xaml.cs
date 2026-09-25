@@ -973,11 +973,8 @@ public partial class QuickLookupWindow : Window
     }
 
     /// <remarks>
-    /// Hedged and with fallbacks, unlike 文字翻譯, which sends to the chosen engine alone. The two
-    /// windows are answering different questions: there, a failure is worth reporting because the
-    /// user is sitting in a window they opened to translate in and can retry. Here the popup has
-    /// about a second of the user's attention and no retry button worth the room, so a free endpoint
-    /// having a bad minute should cost a moment rather than the answer.
+    /// Uses the chosen engine, as 文字翻譯 does. A failed request is handled by this popup;
+    /// it never silently sends the selected text to another translation service.
     /// </remarks>
     private async Task TranslateNowAsync()
     {

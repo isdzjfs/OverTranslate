@@ -57,6 +57,8 @@ public partial class MainWindow : Window
     // translation page's: the two are separate places with separate stop buttons, and one shared
     // player would have the page's speaker silently stop a capture that is still reading.
     private readonly TtsService _tts = new();
+    private readonly CaptureTranslationCache _captureTranslationCache = new();
+    private readonly CaptureOcrReuse _captureOcrReuse = new();
 
     // Kept alive so toolbar translate can re-run OCR/translation on the current selection
     private List<OcrTextBlock> _lastOcrBlocks = [];
@@ -663,6 +665,7 @@ public partial class MainWindow : Window
                 _toolbarWindow?.FollowSelection(selection);
                 // OCR geometry belongs to the old crop until the user recognises this one.
                 _lastOcrBlocks = [];
+                _captureOcrReuse.Clear();
                 _overlayWindow?.ShowOcrDebug([], selection.Left, selection.Top);
 
                 // The marks stay where they were drawn; what moves is the window onto them. See
@@ -742,6 +745,7 @@ public partial class MainWindow : Window
     {
         _selectionSessionId++;
         _lastOcrBlocks     = ocrBlocks;
+        _captureOcrReuse.Clear();
         _lastTranslatedBlocks = blocks;
         _lastColoredBlocks = blocks;
         _lastSelPhysLeft   = selection.Left;
@@ -842,6 +846,7 @@ public partial class MainWindow : Window
         _overlayClosedHandler = (_, _) =>
         {
             _selectionSessionId++;
+            _captureOcrReuse.Clear();
             DisposeSessionHooks();
             CancelSession();
             ToastWindow.Dismiss();
@@ -928,7 +933,8 @@ public partial class MainWindow : Window
             // instance directly. Take our own copy up front — cloning here is safe because we are
             // still on the UI thread with no await since PrepareForTranslation — and let its
             // lifetime match this request instead of the window's.
-            using var workBitmap = ClonePixels(requestCaptureWindow.CroppedBitmap!);
+            var sourceBitmap = requestCaptureWindow.CroppedBitmap!;
+            using var workBitmap = ClonePixels(sourceBitmap);
 
             _overlayWindow?.ShowProcessing(
                 _lastSelPhysLeft,
@@ -942,19 +948,29 @@ public partial class MainWindow : Window
                 workBitmap.Width, workBitmap.Height);
             stage = "ocr";
             stageStarted = Stopwatch.GetTimestamp();
-            var recognizedBlocks = await AppServices.Ocr.RecognizeAsync(
-                workBitmap,
-                req.SourceLang,
-                cancellationToken,
-                req.IsVerticalText,
-                CaptureLayoutPolicy.ForApplication(req.LayoutMode));
-            Log.Info("Capture translation {RequestId} stage=ocr elapsedMs={ElapsedMs} blocks={Blocks}",
+            // A locked capture keeps this exact bitmap until the selection is edited or closed.
+            // Re-running OCR on it after changing only the target language wastes the slowest local
+            // stage, while a new crop or source/layout mode still gets a fresh recognition.
+            var reusedOcr = _captureOcrReuse.TryGet(
+                sourceBitmap, req.SourceLang, req.IsVerticalText, req.LayoutMode,
+                out var previousBlocks);
+            var recognizedBlocks = reusedOcr
+                ? previousBlocks
+                : await AppServices.Ocr.RecognizeAsync(
+                    workBitmap,
+                    req.SourceLang,
+                    cancellationToken,
+                    req.IsVerticalText,
+                    CaptureLayoutPolicy.ForApplication(req.LayoutMode));
+            Log.Info("Capture translation {RequestId} stage=ocr elapsedMs={ElapsedMs} blocks={Blocks} reused={Reused}",
                 requestId, (int)Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds,
-                recognizedBlocks.Count);
+                recognizedBlocks.Count, reusedOcr);
             if (!IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow))
                 return;
 
             _lastOcrBlocks = recognizedBlocks;
+            _captureOcrReuse.Store(
+                sourceBitmap, req.SourceLang, req.IsVerticalText, req.LayoutMode, recognizedBlocks);
             if (_lastOcrBlocks.Count == 0)
             {
                 outcome = "no-text";
@@ -981,9 +997,30 @@ public partial class MainWindow : Window
             // A capture uses only the selected engine; its failure is shown by the handler below.
             stage = "translation";
             stageStarted = Stopwatch.GetTimestamp();
-            var (translated, _) = await AppServices.Translation.TranslateAsync(
-                _lastOcrBlocks, req.SourceLang, req.TargetLang, settings.ApiKey,
-                resilient: false, cancellationToken: cancellationToken);
+            List<TranslatedBlock> translated;
+            if (settings.Provider == Models.TranslationProvider.Google)
+            {
+                var cached = await _captureTranslationCache.TranslateAsync(
+                    _lastOcrBlocks, settings.Provider, req.SourceLang, req.TargetLang,
+                    async missing =>
+                    {
+                        var (answers, _) = await AppServices.Translation.TranslateAsync(
+                            missing, req.SourceLang, req.TargetLang, settings.ApiKey,
+                            cancellationToken: cancellationToken,
+                            engine: settings.Provider);
+                        return answers;
+                    });
+                translated = cached.Blocks;
+                Log.Info("Capture translation {RequestId} cache hits={Hits} requests={Requests} blocks={Blocks}",
+                    requestId, cached.Hits, cached.Requests, _lastOcrBlocks.Count);
+            }
+            else
+            {
+                (translated, _) = await AppServices.Translation.TranslateAsync(
+                    _lastOcrBlocks, req.SourceLang, req.TargetLang, settings.ApiKey,
+                    cancellationToken: cancellationToken,
+                    engine: settings.Provider);
+            }
             Log.Info("Capture translation {RequestId} stage=translation elapsedMs={ElapsedMs} blocks={Blocks}",
                 requestId, (int)Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds,
                 translated.Count);
@@ -1205,6 +1242,7 @@ public partial class MainWindow : Window
                 return;
 
             _lastOcrBlocks = recognizedBlocks;
+            _captureOcrReuse.Clear();
             _overlayWindow?.ShowOcrDebug(_lastOcrBlocks, _lastSelPhysLeft, _lastSelPhysTop);
             if (_lastOcrBlocks.Count == 0)
             {
@@ -1432,6 +1470,7 @@ public partial class MainWindow : Window
         Log.Info("Tearing down capture session, reason={Reason} (overlay={Overlay}, toolbar={Toolbar}, capture={Capture})",
             reason, _overlayWindow != null, _toolbarWindow != null, _captureWindow != null);
         _selectionSessionId++;
+        _captureOcrReuse.Clear();
         DisposeSessionHooks();
         CancelSession();
 

@@ -190,7 +190,7 @@ built-in text to speech (TTS) reads both the original text and the translation a
 | DeepL | Requires registering on DeepL's site and obtaining an API key |
 | OpenAI | Supports the OpenAI API format; a local LLM is recommended, which you can set up quickly with [Ollama](guides/OLLAMA_GUIDE.en.md) |
   
-**Screenshot translation** uses only the selected API and shows an error if its request fails. **Real-time translation** and **quick translation** can try another available API when Google, Bing, or Microsoft fails or responds too slowly. DeepL and OpenAI do not use automatic fallback.
+All translation features use only the selected API. A failed request never switches to another service. Optional dictionary results also come only from the selected service; providers without dictionary support do not query another service.
 
 ### OpenAI settings
 

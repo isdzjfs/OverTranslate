@@ -91,7 +91,6 @@
     <sys:String x:Key="S.Error.OcrSwapTimeout">Timed out waiting for other recognition to finish before switching OCR models.</sys:String>
     <sys:String x:Key="S.Error.OcrImageConvert">Could not convert the image into a format the ONNX OCR can read.</sys:String>
     <sys:String x:Key="S.Error.OcrModelMissing">OCR model file not found: {0}</sys:String>
-    <sys:String x:Key="S.Error.NotTranslated">Not translated</sys:String>
 
     <!-- ── Text translation page ── -->
     <sys:String x:Key="S.Translation.Title">Text translation</sys:String>

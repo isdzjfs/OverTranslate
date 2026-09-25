@@ -11,57 +11,51 @@ namespace OverTranslate.Tests;
 public class DictionaryLookupTests
 {
     [Theory]
-    [InlineData(TranslationProvider.Google, "EN-US", "Google:EN-US:False,Microsoft:EN-US:False,Bing:EN-US:False")]
-    [InlineData(TranslationProvider.Google2, "EN-US", "Google:EN-US:False,Microsoft:EN-US:False")]
-    [InlineData(TranslationProvider.Microsoft, "EN-US", "Microsoft:EN-US:False,Google:EN-US:False,Bing:EN-US:False")]
-    [InlineData(TranslationProvider.Bing, "EN-US", "Bing:EN-US:False,Google:EN-US:False,Microsoft:EN-US:False")]
-    [InlineData(TranslationProvider.DeepL, "EN-US", "Google:EN-US:False,Microsoft:EN-US:False")]
-    [InlineData(TranslationProvider.Google, "ZH-HANT", "Google:ZH-HANT:False,Microsoft:ZH-HANS:True,Bing:ZH-HANS:True")]
-    [InlineData(TranslationProvider.Google2, "ZH-HANT", "Google:ZH-HANT:False,Microsoft:ZH-HANS:True")]
-    [InlineData(TranslationProvider.Microsoft, "ZH-HANT", "Microsoft:ZH-HANS:True,Google:ZH-HANT:False,Bing:ZH-HANS:True")]
-    [InlineData(TranslationProvider.Bing, "ZH-HANT", "Bing:ZH-HANS:True,Google:ZH-HANT:False,Microsoft:ZH-HANS:True")]
-    [InlineData(TranslationProvider.DeepL, "ZH-HANT", "Google:ZH-HANT:False,Microsoft:ZH-HANS:True")]
+    [InlineData(TranslationProvider.Google, "EN-US", "Google:EN-US:False")]
+    [InlineData(TranslationProvider.Google2, "EN-US", "")]
+    [InlineData(TranslationProvider.Microsoft, "EN-US", "Microsoft:EN-US:False")]
+    [InlineData(TranslationProvider.Bing, "EN-US", "Bing:EN-US:False")]
+    [InlineData(TranslationProvider.DeepL, "EN-US", "")]
+    [InlineData(TranslationProvider.Google, "ZH-HANT", "Google:ZH-HANT:False")]
+    [InlineData(TranslationProvider.Google2, "ZH-HANT", "")]
+    [InlineData(TranslationProvider.Microsoft, "ZH-HANT", "Microsoft:ZH-HANS:True")]
+    [InlineData(TranslationProvider.Bing, "ZH-HANT", "Bing:ZH-HANS:True")]
+    [InlineData(TranslationProvider.DeepL, "ZH-HANT", "")]
     [InlineData(TranslationProvider.OpenAI, "ZH-HANT", "")]
-    public void Dictionary_fallback_plan_matches_the_selected_provider_and_target(
+    public void Dictionary_lookup_uses_only_the_selected_provider(
         TranslationProvider provider, string targetLanguage, string expected)
     {
-        var actual = string.Join(",", DictionaryLookupPlan.Build(provider, "EN-US", targetLanguage)
-            .Select(step => $"{step.Provider}:{step.TargetLanguage}:{step.ConvertToTraditional}"));
+        var step = DictionaryLookupPlan.Build(provider, "EN-US", targetLanguage);
+        var actual = step is null ? "" : $"{step.Provider}:{step.TargetLanguage}:{step.ConvertToTraditional}";
 
         Assert.Equal(expected, actual);
     }
 
     [Theory]
     [InlineData(TranslationProvider.Google)]
-    [InlineData(TranslationProvider.Google2)]
     [InlineData(TranslationProvider.Microsoft)]
     [InlineData(TranslationProvider.Bing)]
-    [InlineData(TranslationProvider.DeepL)]
     public void Traditional_Chinese_source_is_simplified_only_for_Microsoft_and_Bing(
         TranslationProvider provider)
     {
-        var steps = DictionaryLookupPlan.Build(provider, "ZH-HANT", "EN-US");
-
-        Assert.All(steps, step =>
-        {
-            var requiresSimplifiedSource =
-                step.Provider is TranslationProvider.Microsoft or TranslationProvider.Bing;
-            Assert.Equal(requiresSimplifiedSource ? "ZH-HANS" : "ZH-HANT", step.SourceLanguage);
-            Assert.Equal(requiresSimplifiedSource, step.ConvertSourceToSimplified);
-            Assert.Equal(requiresSimplifiedSource, step.ConvertToTraditional);
-        });
+        var step = Assert.IsType<DictionaryLookupStep>(
+            DictionaryLookupPlan.Build(provider, "ZH-HANT", "EN-US"));
+        var requiresSimplifiedSource = provider is TranslationProvider.Microsoft or TranslationProvider.Bing;
+        Assert.Equal(requiresSimplifiedSource ? "ZH-HANS" : "ZH-HANT", step.SourceLanguage);
+        Assert.Equal(requiresSimplifiedSource, step.ConvertSourceToSimplified);
+        Assert.Equal(requiresSimplifiedSource, step.ConvertToTraditional);
     }
 
     [Fact]
     public void Traditional_Chinese_source_and_target_conversions_are_independent()
     {
-        var steps = DictionaryLookupPlan.Build(
-            TranslationProvider.Microsoft, "ZH-HANT", "ZH-HANT");
+        var step = Assert.IsType<DictionaryLookupStep>(DictionaryLookupPlan.Build(
+            TranslationProvider.Microsoft, "ZH-HANT", "ZH-HANT"));
 
-        Assert.True(steps[0].ConvertSourceToSimplified);
-        Assert.True(steps[0].ConvertToTraditional);
-        Assert.False(steps[1].ConvertSourceToSimplified);
-        Assert.False(steps[1].ConvertToTraditional);
+        Assert.Equal("ZH-HANS", step.SourceLanguage);
+        Assert.Equal("ZH-HANS", step.TargetLanguage);
+        Assert.True(step.ConvertSourceToSimplified);
+        Assert.True(step.ConvertToTraditional);
     }
 
     [Fact]
@@ -213,34 +207,6 @@ public class DictionaryLookupTests
         Assert.Equal(
             expectedDictionaryHeight,
             Views.Translation.TranslationPage.CalculateDictionaryMaxHeight(availableHeight));
-    }
-
-    [Fact]
-    public async Task Dictionary_lookup_falls_back_when_the_selected_provider_rejects_the_language_pair()
-    {
-        var expected = new DictionaryLookupData(
-            "cost", "Google Web", "cost", null,
-            [new DictionaryLookupGroupData("noun", [
-                new DictionaryEntryData("成本", null, null, null, [], [])
-            ], [], [])], []);
-        var attempts = 0;
-
-        var result = await DictionaryLookupFallback.TryAsync([
-            _ =>
-            {
-                attempts++;
-                return Task.FromException<DictionaryLookupData?>(
-                    new HttpRequestException("The API returned status code 400."));
-            },
-            _ =>
-            {
-                attempts++;
-                return Task.FromResult<DictionaryLookupData?>(expected);
-            }
-        ]);
-
-        Assert.Same(expected, result);
-        Assert.Equal(2, attempts);
     }
 
     [Theory]

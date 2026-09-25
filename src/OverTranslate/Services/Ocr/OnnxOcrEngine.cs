@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -226,7 +227,9 @@ internal sealed class OnnxOcrEngine : IOcrEngine
         // Select the runtime and register an in-use reference atomically under _sync, so the
         // idle timer cannot dispose it between selection and Detect. The matching release
         // (which also re-arms the idle countdown) runs in the finally, under _sync.
+        var modelStarted = Stopwatch.GetTimestamp();
         var runtime = AcquireRuntime(normalizedLanguage);
+        var modelMs = (int)Stopwatch.GetElapsedTime(modelStarted).TotalMilliseconds;
         try
         {
             Log.Info(
@@ -253,9 +256,12 @@ internal sealed class OnnxOcrEngine : IOcrEngine
             // RealtimeDetectorSize asks for, 7 of 48 dark Japanese page regions come back with the
             // glyphs they were dropping, and 313 subtitle, game, comic, panel and chat frames do
             // not move at all.
+            var detectStarted = Stopwatch.GetTimestamp();
             using var session = new DetectionSession(
                 this, runtime, bitmap, normalizedLanguage, maxDetectSize,
                 releasesRuntime: false, repairRows: !verticalText, verticalText: verticalText);
+            var detectMs = (int)Stopwatch.GetElapsedTime(detectStarted).TotalMilliseconds;
+            var readStarted = Stopwatch.GetTimestamp();
             var blocks = session
                 .Recognize(Enumerable.Range(0, session.Boxes.Count).ToArray(), out var recognised)
                 .ToList();
@@ -263,6 +269,11 @@ internal sealed class OnnxOcrEngine : IOcrEngine
             if (verticalText)
                 blocks.AddRange(ReadTurnedFrame(
                     runtime, bitmap, normalizedLanguage, maxDetectSize, blocks));
+
+            if (CaptureTranslationDiagnostics.RequestId is long requestId)
+                Log.Info("Capture translation {RequestId} ocr-detail modelMs={ModelMs} detectMs={DetectMs} readMs={ReadMs} boxes={Boxes}",
+                    requestId, modelMs, detectMs,
+                    (int)Stopwatch.GetElapsedTime(readStarted).TotalMilliseconds, session.Boxes.Count);
 
             // Counts and lengths only — enough to tell "found nothing" from "found the wrong thing"
             // without the recognised text itself, which LogBlocks keeps at Debug.

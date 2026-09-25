@@ -193,7 +193,7 @@ OverTranslate 目前提供了五種翻譯功能，可依不同使用情境快速
 | DeepL | 需至 DeepL 官方註冊並取得 API Key |
 | OpenAI | 支援 OpenAI API 格式，建議使用本地 LLM，可透過 [Ollama](docs/guides/OLLAMA_GUIDE.md) 快速安裝與使用 |
   
-**截圖翻譯**只使用所選的翻譯 API；請求失敗時會顯示錯誤，不會自動切換。**即時翻譯**與**快速翻譯**使用 Google、Bing 或 Microsoft 時，若服務無法使用或回應過慢，會嘗試其他可用的翻譯 API。DeepL 與 OpenAI 不會觸發備援機制。
+所有翻譯功能只使用所選的翻譯 API；請求失敗時不會自動切換到其他服務。可選的詞典結果也只向所選服務查詢；不支援詞典的服務不會改用其他服務查詢。
 
 ### OpenAI 設定
 
