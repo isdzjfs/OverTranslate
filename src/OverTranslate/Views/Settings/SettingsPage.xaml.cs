@@ -16,6 +16,7 @@ using TextBox = System.Windows.Controls.TextBox;
 using Brush = System.Windows.Media.Brush;
 using Button = System.Windows.Controls.Button;
 using Clipboard = System.Windows.Clipboard;
+using MediaFontFamily = System.Windows.Media.FontFamily;
 
 namespace OverTranslate.Views.Settings;
 
@@ -30,6 +31,15 @@ namespace OverTranslate.Views.Settings;
 /// </remarks>
 public partial class SettingsPage : UserControl
 {
+    private sealed record FontFamilyOption(string Value, string Display, MediaFontFamily PreviewFamily);
+
+    private static readonly string[] InstalledFontFamilies = Fonts.SystemFontFamilies
+        .Select(font => font.Source)
+        .Where(source => !string.IsNullOrWhiteSpace(source))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(source => source, StringComparer.CurrentCultureIgnoreCase)
+        .ToArray();
+
     private readonly DispatcherTimer _statusHold;
 
     /// <summary>
@@ -205,6 +215,12 @@ public partial class SettingsPage : UserControl
             LightThemeRadio.IsChecked = s.Theme != ThemeService.Dark;
             DarkThemeRadio.IsChecked  = s.Theme == ThemeService.Dark;
 
+            var selectedFont = CaptureTranslationFont.NormalizeSelection(s.Capture.FontFamily);
+            CaptureFontFamilyBox.ItemsSource = FontFamilyOptions(selectedFont);
+            CaptureFontFamilyBox.SelectedValue = selectedFont;
+            if (CaptureFontFamilyBox.SelectedValue == null)
+                CaptureFontFamilyBox.SelectedIndex = 0;
+
             // LocalizationService.Current, not s.UiLanguage: an unset preference is showing the
             // system default right now, and the picker has to agree with what is on screen.
             UiLanguageBox.ItemsSource = LocalizationService.Options;
@@ -311,6 +327,40 @@ public partial class SettingsPage : UserControl
         apply(SettingsService.Instance.Current);
         SettingsService.Instance.Save();
         FlashSaved();
+    }
+
+    private static List<FontFamilyOption> FontFamilyOptions(string selected)
+    {
+        var options = InstalledFontFamilies
+            .Select(source => new FontFamilyOption(
+                source,
+                source,
+                CaptureTranslationFont.Resolve(source)))
+            .ToList();
+
+        // Keep a hand-edited or now-uninstalled choice visible. Rendering still falls through to
+        // the default stack, and the user can replace it with any family currently installed.
+        if (selected.Length > 0 && !options.Any(option =>
+                option.Value.Equals(selected, StringComparison.OrdinalIgnoreCase)))
+        {
+            options.Insert(0, new FontFamilyOption(
+                selected,
+                selected,
+                CaptureTranslationFont.Resolve(selected)));
+        }
+
+        options.Insert(0, new FontFamilyOption(
+            "",
+            LocalizationService.Get("S.Settings.CaptureFontDefault"),
+            CaptureTranslationFont.Resolve("")));
+        return options;
+    }
+
+    private void CaptureFontFamilyBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || CaptureFontFamilyBox.SelectedValue is not string selected) return;
+
+        Persist(s => s.Capture.FontFamily = CaptureTranslationFont.NormalizeSelection(selected));
     }
 
     private void FlashSaved() => FlashSuccess(LocalizationService.Get("S.Settings.Saved"));

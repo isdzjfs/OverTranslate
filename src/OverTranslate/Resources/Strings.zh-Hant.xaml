@@ -535,6 +535,9 @@
     <sys:String x:Key="S.Settings.Theme">主題</sys:String>
     <sys:String x:Key="S.Settings.ThemeLight">淺色</sys:String>
     <sys:String x:Key="S.Settings.ThemeDark">深色</sys:String>
+    <sys:String x:Key="S.Settings.CaptureFont">截圖翻譯字體</sys:String>
+    <sys:String x:Key="S.Settings.CaptureFontDefault">預設（Microsoft JhengHei）</sys:String>
+    <sys:String x:Key="S.Settings.CaptureFontHint">用於覆蓋在截圖上的譯文；缺少字形時會自動使用預設字體。</sys:String>
     <sys:String x:Key="S.Settings.UiLanguage">介面語言</sys:String>
 
     <sys:String x:Key="S.Settings.Advanced">進階設定</sys:String>

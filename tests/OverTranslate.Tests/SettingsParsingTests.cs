@@ -534,6 +534,7 @@ public class SettingsParsingTests
             RealtimePauseHotkeyEnabled = false,
             Capture =
             {
+                FontFamily = "Microsoft YaHei UI",
                 VerticalText = true,
             },
             QuickLookup =
@@ -579,6 +580,7 @@ public class SettingsParsingTests
         Assert.Equal(0x44u, settings.RealtimePauseHotkeyVirtualKey);
         Assert.Equal("Ctrl+Shift+D", settings.RealtimePauseHotkeyDisplay);
         Assert.False(settings.RealtimePauseHotkeyEnabled);
+        Assert.Equal("Microsoft YaHei UI", settings.Capture.FontFamily);
         Assert.True(settings.Capture.VerticalText);
         Assert.True(settings.QuickLookup.AutoCopyTranslation);
         Assert.True(settings.QuickLookup.ResultsCollapsed);

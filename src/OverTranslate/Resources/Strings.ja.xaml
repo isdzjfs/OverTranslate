@@ -519,6 +519,9 @@
     <sys:String x:Key="S.Settings.Theme">テーマ</sys:String>
     <sys:String x:Key="S.Settings.ThemeLight">ライト</sys:String>
     <sys:String x:Key="S.Settings.ThemeDark">ダーク</sys:String>
+    <sys:String x:Key="S.Settings.CaptureFont">スクリーンショット翻訳のフォント</sys:String>
+    <sys:String x:Key="S.Settings.CaptureFontDefault">既定（Microsoft JhengHei）</sys:String>
+    <sys:String x:Key="S.Settings.CaptureFontHint">スクリーンショットに重ねる翻訳文に使用します。文字がない場合は既定のフォントに切り替わります。</sys:String>
     <sys:String x:Key="S.Settings.UiLanguage">表示言語</sys:String>
 
     <sys:String x:Key="S.Settings.Advanced">詳細設定</sys:String>

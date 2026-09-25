@@ -519,6 +519,9 @@
     <sys:String x:Key="S.Settings.Theme">테마</sys:String>
     <sys:String x:Key="S.Settings.ThemeLight">라이트</sys:String>
     <sys:String x:Key="S.Settings.ThemeDark">다크</sys:String>
+    <sys:String x:Key="S.Settings.CaptureFont">스크린샷 번역 글꼴</sys:String>
+    <sys:String x:Key="S.Settings.CaptureFontDefault">기본값(Microsoft JhengHei)</sys:String>
+    <sys:String x:Key="S.Settings.CaptureFontHint">스크린샷 위에 표시되는 번역문에 사용합니다. 글자가 없으면 기본 글꼴로 대체됩니다.</sys:String>
     <sys:String x:Key="S.Settings.UiLanguage">인터페이스 언어</sys:String>
 
     <sys:String x:Key="S.Settings.Advanced">고급 설정</sys:String>

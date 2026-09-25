@@ -517,6 +517,9 @@ same settings, the same seed usually gives the same output.</sys:String>
     <sys:String x:Key="S.Settings.Theme">Theme</sys:String>
     <sys:String x:Key="S.Settings.ThemeLight">Light</sys:String>
     <sys:String x:Key="S.Settings.ThemeDark">Dark</sys:String>
+    <sys:String x:Key="S.Settings.CaptureFont">Screenshot translation font</sys:String>
+    <sys:String x:Key="S.Settings.CaptureFontDefault">Default (Microsoft JhengHei)</sys:String>
+    <sys:String x:Key="S.Settings.CaptureFontHint">Used for translated text overlaid on screenshots; missing glyphs fall back to the default fonts.</sys:String>
     <sys:String x:Key="S.Settings.UiLanguage">Interface language</sys:String>
 
     <sys:String x:Key="S.Settings.Advanced">Advanced</sys:String>

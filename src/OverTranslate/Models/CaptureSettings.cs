@@ -8,6 +8,13 @@ namespace OverTranslate.Models;
 public class CaptureSettings
 {
     /// <summary>
+    /// System font family used for translated text drawn over a screenshot. Empty keeps the
+    /// application's original font stack, so settings files written before this option existed do
+    /// not change appearance after an update.
+    /// </summary>
+    public string FontFamily { get; set; } = "";
+
+    /// <summary>
     /// Whether the capture toolbar last translated text written downwards in columns. False means
     /// the ordinary horizontal layout and remains the default for existing settings files.
     /// </summary>

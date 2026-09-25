@@ -5,6 +5,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using OverTranslate.Services;
 using OverTranslate.Layout;
+using MediaFontFamily = System.Windows.Media.FontFamily;
 
 namespace OverTranslate.Views.Overlay;
 
@@ -48,6 +49,7 @@ public partial class OverlayWindow : Window
     private string _currentSourceLanguage;
     private string _currentTargetLanguage;
     private bool _currentVerticalText;
+    private readonly MediaFontFamily _captureFontFamily;
 
     /// <summary>
     /// The repaired capture each bubble is painted from, when there is one. Null leaves every
@@ -80,6 +82,8 @@ public partial class OverlayWindow : Window
         _currentSourceLanguage = sourceLanguage;
         _currentTargetLanguage = targetLanguage;
         _currentVerticalText = verticalText;
+        _captureFontFamily = CaptureTranslationFont.Resolve(
+            SettingsService.Instance.Current.Capture.FontFamily);
         SettingsService.Instance.OcrDebugChanged += OnOcrDebugChanged;
         Closed += (_, _) => SettingsService.Instance.OcrDebugChanged -= OnOcrDebugChanged;
 
@@ -387,7 +391,7 @@ public partial class OverlayWindow : Window
             double minFontSize = SourceFontScale.MinFontSize(sourceFontReferenceHeight);
             double fontSize = SourceFontScale.Calculate(sourceFontReferenceHeight, IsLatinSourceToCjkTarget());
             var typeface = new Typeface(
-                new System.Windows.Media.FontFamily("Microsoft JhengHei, Segoe UI, Sans-Serif"),
+                _captureFontFamily,
                 FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
             double availableWidth = Math.Max(BubbleMinWidth, canvasWidth - OverlayPadding * 2);
             double targetBorderW = borderW;
@@ -636,7 +640,7 @@ public partial class OverlayWindow : Window
                     // swapped. If it comes back, it gets designed then, on a case somebody has
                     // actually looked at.
                     VerticalAlignment = VerticalAlignment.Center,
-                    FontFamily = new System.Windows.Media.FontFamily("Microsoft JhengHei, Segoe UI, Sans-Serif"),
+                    FontFamily = _captureFontFamily,
                 }
             };
 
@@ -748,8 +752,7 @@ public partial class OverlayWindow : Window
                     FontWeight = FontWeights.SemiBold,
                     Foreground = foreground,
                     TextAlignment = TextAlignment.Center,
-                    FontFamily = new System.Windows.Media.FontFamily(
-                        "Microsoft JhengHei, Segoe UI, Sans-Serif"),
+                    FontFamily = _captureFontFamily,
                 };
                 if (RotatesInVerticalText(glyph))
                 {

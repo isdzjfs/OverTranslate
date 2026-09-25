@@ -1000,6 +1000,30 @@
                                                  Checked="ThemeRadio_Checked"/>
                                 </StackPanel>
                             </Grid>
+
+                                <Border Height="1" Margin="0,14,0,12"
+                                        Background="{DynamicResource AppSeparator}"/>
+
+                                <TextBlock Text="{DynamicResource S.Settings.CaptureFont}"
+                                           Style="{StaticResource FieldLabel}"
+                                           Margin="0,0,0,7"/>
+                                <ComboBox x:Name="CaptureFontFamilyBox"
+                                          Style="{StaticResource ModernComboBox}"
+                                          SelectedValuePath="Value"
+                                          TextSearch.TextPath="Display"
+                                          MaxDropDownHeight="360"
+                                          SelectionChanged="CaptureFontFamilyBox_SelectionChanged">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Display}"
+                                                       FontFamily="{Binding PreviewFamily}"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <TextBlock Text="{DynamicResource S.Settings.CaptureFontHint}"
+                                           Style="{StaticResource FieldHint}"
+                                           Margin="0,7,0,0"/>
                         </StackPanel>
                     </Border>
 
