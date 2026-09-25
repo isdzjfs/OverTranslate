@@ -716,7 +716,7 @@ public partial class MainWindow : Window
             EnterOverlayState(captureWindow, selection, [], [], settings.SourceLanguage, hasTranslated: false);
 
             // Fire in the same pass that built the overlay, before it paints: the toolbar's first
-            // frame already reads "翻譯中..." and the overlay's first frame already shows "辨識中".
+            // frame and overlay already read "翻譯中..." / "翻譯中".
             // Deferring this to a later dispatcher pass only adds a visible gap where the toolbar
             // sits idle after the selection is done.
             if (settings.AutoTranslateAfterSelection)
@@ -924,7 +924,7 @@ public partial class MainWindow : Window
                 _lastSelPhysTop,
                 _lastSelPhysWidth,
                 _lastSelPhysHeight,
-                LocalizationService.Get("S.Main.Recognising"));
+                LocalizationService.Get("S.Main.Translating"));
 
             var recognizedBlocks = await AppServices.Ocr.RecognizeAsync(
                 workBitmap,
