@@ -5,5 +5,5 @@ host      = x86_64-pc-windows-msvc
 icon      = src\OverTranslate\icons\app.ico
 icon_sha  = a425d8f46f75971fca04b6d6f64f3afd2c0d85fb52ee29d743df5619b74bc9f4
 binary    = OverTranslate-launcher-unsigned.exe
-binary_sha= e8df80c9c73eedc9fe8850be6acb9ba580df89bdd31f52dcf221b14129768466
-size      = 345088
+binary_sha= 9e61ab3b0241c2048aed091b138c0134d650aa07b9882c80de3fd16945a7b657
+size      = 367616

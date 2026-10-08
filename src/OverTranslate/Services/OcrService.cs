@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Windows;
 using OverTranslate.Services.Ocr;
+using OverTranslate.Services.Ocr.Manga;
 
 namespace OverTranslate.Services;
 
@@ -37,6 +38,47 @@ public record OcrTextBlock(
     public double? LayoutInkHeight { get; init; }
 
     /// <summary>
+    /// The glyph height (physical px) the overlay font is sized from, where that differs in meaning
+    /// from <see cref="RenderGlyphHeight"/>.
+    /// </summary>
+    /// <remarks>
+    /// The two are the same number on a level line. On a tilted one they part: the font wants the
+    /// height of the letters, measured along the line (see <see cref="Ocr.OcrLineGeometry"/>), while
+    /// <see cref="RenderGlyphHeight"/> is also what the realtime overlay erases and covers with, and
+    /// a tilted line's letters reach the full height of its upright box. So this one carries the
+    /// letters and that one keeps the coverage. Null wherever no font height was estimated; the
+    /// overlays then size from <see cref="RenderGlyphHeight"/>, as they always did.
+    /// </remarks>
+    public double? FontGlyphHeight { get; init; }
+
+    /// <summary>
+    /// The detector's own box measured along and across the line — see <see cref="Ocr.OcrLineGeometry"/>.
+    /// Set on conversion, read by normalisation, and not carried through grouping: a group has no
+    /// single quadrilateral.
+    /// </summary>
+    internal Ocr.OcrLineGeometry? LineGeometry { get; init; }
+
+    /// <summary>
+    /// The box the detector drew, held aside while <see cref="LayoutBounds"/> carries a level one for
+    /// the grouping rules — see <see cref="Ocr.TiltedLayout"/>. Null on every level line, and null
+    /// again once grouping is done and the upright box is back.
+    /// </summary>
+    internal System.Windows.Rect? UprightLayoutBounds { get; init; }
+
+    /// <summary>
+    /// The tilted lines this block was made of, as <see cref="Ocr.TiltedLayout"/> levelled them —
+    /// held while grouping runs, and turned into <see cref="Tilt"/> once it is done. Null on every
+    /// level line, and on a group any of whose pieces was level.
+    /// </summary>
+    internal IReadOnlyList<Ocr.TiltedLine>? TiltedLines { get; init; }
+
+    /// <summary>
+    /// How a group read off a tilted card is to be drawn — see <see cref="Ocr.TiltedText"/>. Null on
+    /// everything else, which is drawn exactly as it always was.
+    /// </summary>
+    internal Ocr.TiltedText? Tilt { get; init; }
+
+    /// <summary>
     /// This block's own text runs across the page rather than down it.
     /// </summary>
     /// <remarks>
@@ -56,6 +98,20 @@ public record OcrTextBlock(
 public class OcrService : IDisposable
 {
     private readonly OnnxOcrEngine _engine = new();
+    private readonly MangaOcrEngine? _manga;
+
+    public OcrService()
+    {
+    }
+
+    /// <param name="mangaModels">
+    /// Where the downloadable manga models are. With them, Japanese vertical text is read by those
+    /// models on the GPU whenever they can be used — see <see cref="RecognizeVerticalAsync"/>.
+    /// </param>
+    internal OcrService(MangaModelStore mangaModels) => _manga = new MangaOcrEngine(mangaModels);
+
+    /// <summary>The manga models' engine, or null in a build that was not given them.</summary>
+    internal MangaOcrEngine? Manga => _manga;
 
     /// <param name="layoutMode">
     /// What the user said this capture holds. The only thing it decides here is which thresholds
@@ -76,10 +132,16 @@ public class OcrService : IDisposable
 
         // The mode picks the thresholds for horizontal text only. Vertical has its own profile and
         // does not take a parameter for one — see RecognizeVerticalAsync.
-        return verticalText
-            ? RecognizeVerticalAsync(_engine, bitmap, language, cancellationToken)
-            : RecognizeAndGroupAsync(_engine, bitmap, language, GroupingProfile.For(layoutMode), cancellationToken);
+        return LevelCrowdedTilts(verticalText
+            ? RecognizeVerticalAsync(_engine, bitmap, language, cancellationToken, _manga)
+            : RecognizeAndGroupAsync(_engine, bitmap, language, GroupingProfile.For(layoutMode), cancellationToken));
     }
+
+    // Here, where every path's groups are final — columns and the lines across a vertical page
+    // alike — because the groups that collide need not have been grouped together. See
+    // Ocr.TiltedOverlap.
+    private static async Task<List<OcrTextBlock>> LevelCrowdedTilts(Task<List<OcrTextBlock>> groups) =>
+        TiltedOverlap.Level(await groups);
 
     /// <summary>
     /// Recognises only if the engine has a free slot right now, returning null instead of queueing.
@@ -106,8 +168,10 @@ public class OcrService : IDisposable
 
         if (orientation == Realtime.RealtimeTextOrientation.Vertical)
         {
-            return await TryRecognizeVerticalAsync(
-                _engine, bitmap, OcrLanguageRouter.Normalize(sourceLanguage), maxDetectSize, cancellationToken);
+            var columns = await TryRecognizeVerticalAsync(
+                _engine, bitmap, OcrLanguageRouter.Normalize(sourceLanguage), maxDetectSize, cancellationToken,
+                _manga);
+            return columns is null ? null : TiltedOverlap.Level(columns);
         }
 
         var blocks = await _engine.TryRecognizeAsync(
@@ -127,23 +191,46 @@ public class OcrService : IDisposable
         // There is no toolbar in front of a running video, so there is no CaptureLayoutMode to
         // honour here; taking one would mean a mode the user chose for a still capture silently
         // steering frames it was never asked about.
-        return GroupRealtime(blocks, bitmap.Height, mode);
+        return TiltedOverlap.Level(GroupRealtime(blocks, bitmap.Height, mode));
     }
 
+    /// <summary>
+    /// The column detector alone, for the manga path to tell which of its blocks are tilted — see
+    /// <see cref="Ocr.Manga.MangaColumnAngles"/>. Null for an engine that is not the ONNX one.
+    /// </summary>
+    private static Func<Bitmap, IReadOnlyList<SkiaSharp.SKPointI[]>>? ColumnDetector(IOcrEngine engine, string language) =>
+        engine is OnnxOcrEngine onnx ? mosaic => onnx.DetectQuads(mosaic, language) : null;
+
     /// <summary>Reads original-frame columns without queueing a busy realtime engine.</summary>
+    /// <remarks>
+    /// With <paramref name="manga"/> usable the page goes to the manga models instead, as on the
+    /// screenshot path — see <see cref="RecognizeVerticalAsync"/>. A GPU busy with another page is
+    /// null here, like a busy column engine: the next poll asks again.
+    /// </remarks>
     internal static async Task<List<OcrTextBlock>?> TryRecognizeVerticalAsync(
         IOcrEngine engine,
         Bitmap bitmap,
         string language,
         int? maxDetectSize,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        MangaOcrEngine? manga = null)
     {
+        if (manga is not null && ReadsWithMangaModels(language))
+        {
+            var (outcome, read) = await MangaVerticalReader.ReadAsync(
+                manga, bitmap, wait: false,
+                (part, token) => ReadColumnsAsync(engine, part, language, token), cancellationToken,
+                ColumnDetector(engine, language));
+            if (outcome == MangaReadOutcome.Busy) return null;
+            if (outcome == MangaReadOutcome.Read) return read;
+        }
+
         var blocks = await engine.TryRecognizeAsync(
             bitmap, language, maxDetectSize, cancellationToken, verticalText: true);
         return blocks is null
             ? null
             : Ocr.VerticalColumnGrouping.Group(
-                blocks, bitmap.Width, realtime: true, bitmap: bitmap);
+                blocks, bitmap.Width, realtime: true, bitmap: bitmap, language: language);
     }
 
 
@@ -173,6 +260,17 @@ public class OcrService : IDisposable
     internal static List<OcrTextBlock> GroupRealtime(List<OcrTextBlock> blocks, double frameHeight,
         Realtime.RealtimeBlockMode mode, GroupingTrace? trace = null,
         List<OcrTextBlockGrouper.NextLineDecision>? decisions = null)
+    {
+        // Tilted cards are levelled for the grouping rules and given back upright afterwards — see
+        // Ocr.TiltedLayout. Before the filters, which read only text, confidence and Bounds, so that
+        // the harness trace below registers the same instances the groupers then see.
+        blocks = TiltedLayout.Straighten(blocks);
+        return TiltedLayout.Restore(GroupStraightened(blocks, frameHeight, mode, trace, decisions));
+    }
+
+    private static List<OcrTextBlock> GroupStraightened(List<OcrTextBlock> blocks, double frameHeight,
+        Realtime.RealtimeBlockMode mode, GroupingTrace? trace,
+        List<OcrTextBlockGrouper.NextLineDecision>? decisions)
     {
         var filtered = RejectUnconvincingBlocks(blocks);
         if (mode != Realtime.RealtimeBlockMode.Subtitle)
@@ -237,13 +335,33 @@ public class OcrService : IDisposable
     /// Keeps the loaded model in memory while a continuous caller is running — see
     /// <see cref="OnnxOcrEngine.SetKeepWarm"/>.
     /// </summary>
-    public void SetKeepWarm(bool keepWarm) => _engine.SetKeepWarm(keepWarm);
+    public void SetKeepWarm(bool keepWarm)
+    {
+        _engine.SetKeepWarm(keepWarm);
+        _manga?.SetKeepWarm(keepWarm);
+    }
 
     /// <summary>
     /// Releases the loaded model immediately rather than after the inactivity delay — see
     /// <see cref="OnnxOcrEngine.ReleaseNow"/>.
     /// </summary>
-    public void ReleaseModel() => _engine.ReleaseNow();
+    public void ReleaseModel()
+    {
+        _engine.ReleaseNow();
+        _manga?.ReleaseNow();
+    }
+
+    /// <summary>
+    /// Whether a vertical page in this language would be read by the manga models right now.
+    /// </summary>
+    /// <remarks>
+    /// For the realtime loop's confirmation pass. The column pipeline's answer moves with the detector
+    /// size, which is what makes a second read at another size worth having (see
+    /// <see cref="Ocr.VerticalSecondLook"/>); the manga detector always sees the page at 640×640, so
+    /// reading the same frame again returns the same page.
+    /// </remarks>
+    internal bool ReadsVerticalWithMangaModels(string sourceLanguage) =>
+        _manga is not null && ReadsWithMangaModels(sourceLanguage) && _manga.UnavailableReason is null;
 
     /// <summary>
     /// How many recognitions may run at once. Exposed so a caller that was turned away can say how
@@ -253,6 +371,7 @@ public class OcrService : IDisposable
 
     public void Dispose()
     {
+        _manga?.Dispose();
         _engine.Dispose();
     }
 
@@ -265,27 +384,75 @@ public class OcrService : IDisposable
     {
         var blocks = await engine.RecognizeAsync(bitmap, sourceLanguage, cancellationToken);
         blocks = PrepareScreenshotGrouping(bitmap, blocks, profile);
-        return OcrTextBlockGrouper.Group(blocks, profile);
+        // After the ink is measured, which has to read the picture inside the upright box.
+        return TiltedLayout.Restore(OcrTextBlockGrouper.Group(TiltedLayout.Straighten(blocks), profile));
+    }
+
+    /// <summary>
+    /// The same grouping for lines already read, on pixels already converted: what a vertical
+    /// capture does with the lines it reads across — see <see cref="Ocr.VerticalColumnGrouping"/>.
+    /// </summary>
+    /// <remarks>
+    /// The pixels rather than the bitmap because the column grouping has converted the page once
+    /// already, and converting it again cost more than everything else this does: 4ms of a 4.2ms
+    /// total on an 1820x1298 page holding three lines.
+    /// </remarks>
+    /// <param name="pixels">The capture, for the ink measurement; null skips it.</param>
+    internal static List<OcrTextBlock> GroupScreenshot(
+        SkiaSharp.SKBitmap? pixels, List<OcrTextBlock> blocks, GroupingProfile profile)
+    {
+        if (pixels is not null && MeasuresInk(profile))
+            blocks = TextInkMetrics.Annotate(pixels, blocks);
+        return TiltedLayout.Restore(OcrTextBlockGrouper.Group(TiltedLayout.Straighten(blocks), profile));
     }
 
     internal static List<OcrTextBlock> PrepareScreenshotGrouping(
         Bitmap bitmap, List<OcrTextBlock> blocks, GroupingProfile profile) =>
-        profile.SolidLineAdvanceWhenWrapped > OcrTextBlockGrouper.SolidLineAdvance
+        MeasuresInk(profile)
             ? TextInkMetrics.Annotate(bitmap, blocks)
             : blocks;
+
+    private static bool MeasuresInk(GroupingProfile profile) =>
+        profile.SolidLineAdvanceWhenWrapped > OcrTextBlockGrouper.SolidLineAdvance;
 
     /// <summary>
     /// Detects columns in the original frame; only recognition crops change orientation.
     /// Screenshot and realtime share the same source-coordinate grouping.
     /// </summary>
+    /// <remarks>
+    /// <para>Japanese goes to the manga models (RT-DETR bubble and text detection, manga-ocr
+    /// recognition, on the GPU) when they are downloaded and a hardware GPU can run them — see
+    /// <see cref="MangaVerticalReader"/>. Everything else — another language, no models, no GPU, a
+    /// load that failed — is read with the column pipeline, exactly as it was before they existed.</para>
+    ///
+    /// <para>manga-ocr reads Japanese only; a Chinese or Korean page stays on the columns.</para>
+    /// </remarks>
     internal static async Task<List<OcrTextBlock>> RecognizeVerticalAsync(
         IOcrEngine engine,
         Bitmap bitmap,
         string sourceLanguage,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        MangaOcrEngine? manga = null)
+    {
+        if (manga is not null && ReadsWithMangaModels(sourceLanguage))
+        {
+            var (outcome, read) = await MangaVerticalReader.ReadAsync(
+                manga, bitmap, wait: true,
+                (part, token) => ReadColumnsAsync(engine, part, sourceLanguage, token), cancellationToken,
+                ColumnDetector(engine, sourceLanguage));
+            if (outcome == MangaReadOutcome.Read) return read!;
+        }
+
+        return await ReadColumnsAsync(engine, bitmap, sourceLanguage, cancellationToken);
+    }
+
+    private static async Task<List<OcrTextBlock>> ReadColumnsAsync(
+        IOcrEngine engine, Bitmap bitmap, string sourceLanguage, CancellationToken cancellationToken)
     {
         var blocks = await engine.RecognizeAsync(
             bitmap, sourceLanguage, cancellationToken, verticalText: true);
-        return Ocr.VerticalColumnGrouping.Group(blocks, bitmap.Width, bitmap: bitmap);
+        return Ocr.VerticalColumnGrouping.Group(blocks, bitmap.Width, bitmap: bitmap, language: sourceLanguage);
     }
+
+    private static bool ReadsWithMangaModels(string language) => OcrLanguageRouter.Normalize(language) == "JA";
 }

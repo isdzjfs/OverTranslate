@@ -3,7 +3,9 @@ using System.Text.Json.Serialization;
 namespace OverTranslate.Models;
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
-public enum TranslationProvider { Google, Google2, Bing, Microsoft, DeepL, OpenAI }
+// Stored by name. Google remains this fork's translateHtml/Google2 choice, and
+// Google2 remains RPC. GoogleChrome accepts settings written by upstream's Beta option.
+public enum TranslationProvider { Google, Google2, GoogleChrome, GoogleWeb, Bing, Microsoft, DeepL, OpenAI }
 
 public class AppSettings
 {
@@ -106,9 +108,14 @@ public class AppSettings
     public bool QuickLookupHotkeyEnabled { get; set; } = true;
 
     /// <summary>
-    /// Replaces the selected text with its translation, in place. Ctrl+Alt+E by default.
+    /// 替換翻譯's shortcut: replaces the selected text with its translation, in place. Ctrl+Alt+E
+    /// by default.
     /// </summary>
     /// <remarks>
+    /// QuickTranslate in these names is 替換翻譯's name from before the rename; they are settings
+    /// file keys and keep it — see <see cref="QuickTranslateSettings"/>.
+    ///
+
     /// E for 取代 — the letters the other four are named after are taken (A, W, S, Q), and this one
     /// is the shortcut people reach for while writing in a language that is not theirs, where what
     /// they want is the replacement rather than a window about it. Ctrl+Alt+E is claimed by nothing
@@ -151,6 +158,28 @@ public class AppSettings
     public string OpenAiBaseUrl { get; set; } = "";
     public string OpenAiApiKey { get; set; } = "";
 
+    /// <summary>
+    /// How long one OpenAI-compatible request may take, in seconds, or null for
+    /// <see cref="Services.Providers.OpenAiCompatibleProvider.DefaultTimeoutSeconds"/>.
+    /// </summary>
+    /// <remarks>
+    /// Null rather than a copy of the default, for the same reason as <see cref="OpenAiBaseUrl"/>.
+    /// A value under the minimum — a hand-edited file — is read as the minimum, see
+    /// <see cref="Services.Providers.OpenAiCompatibleProvider.TimeoutSecondsFor"/>.
+    /// </remarks>
+    public int? OpenAiTimeoutSeconds { get; set; }
+
+    /// <summary>
+    /// The key 「Google 翻譯 (Beta)」 sends, read from Google's translate element the first time it
+    /// is used and again only when Google refuses it. Empty until then.
+    /// </summary>
+    /// <remarks>
+    /// Kept here rather than written into the program, and kept at all so that a key that works is
+    /// never looked up twice — see <c>GoogleChromeKeySource</c>.
+    /// Named to end in ApiKey so the diagnostic bundle hides it like the user's own keys.
+    /// </remarks>
+    public string GoogleChromeApiKey { get; set; } = "";
+
     public string Theme { get; set; } = "Dark";
     /// <summary>
     /// The interface language — one of the codes in
@@ -171,6 +200,18 @@ public class AppSettings
     public string UiLanguage { get; set; } = "";
     public bool AutoTranslateAfterSelection { get; set; } = false;
     public bool SaveScreenshotToDisk { get; set; } = false;
+
+    /// <summary>
+    /// Whether Japanese vertical text is read with the downloaded manga models, when they are here
+    /// and can run. Off sends it to the column pipeline, as though they were not downloaded.
+    /// </summary>
+    /// <remarks>
+    /// Only means anything while the models are downloaded: the card shows the switch then and only
+    /// then, and a delete or a new download puts it back on — see
+    /// <see cref="Services.MangaModelOptions"/>. Turned off mostly to give a game the video memory.
+    /// </remarks>
+    public bool UseMangaModels { get; set; } = true;
+
     /// <summary>Empty means "use ScreenshotSaveService.DefaultDirectory" (圖片\OverTranslate).</summary>
     public string ScreenshotSavePath { get; set; } = "";
     /// <summary>Off by default: Debug records the recognised text, i.e. the user's screen contents.</summary>
@@ -198,7 +239,10 @@ public class AppSettings
     /// <summary>What 取詞翻譯 keeps between lookups, grouped.</summary>
     public QuickLookupSettings QuickLookup { get; set; } = new();
 
-    /// <summary>Language preferences used only by quick translation.</summary>
+    /// <summary>
+    /// Language preferences used only by 替換翻譯 — named QuickTranslate from before the rename, see
+    /// <see cref="QuickTranslateSettings"/>.
+    /// </summary>
     public QuickTranslateSettings QuickTranslate { get; set; } = new();
 
     /// <summary>What 即時翻譯 keeps between sittings, grouped.</summary>

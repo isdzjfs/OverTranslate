@@ -120,7 +120,7 @@
     <SolidColorBrush x:Key="ToolbarSegmentThumbBorder" Color="#D8D8D8"/>
     <Color x:Key="ToolbarShadowColor"          >#000000</Color>
 
-    <!-- 快速翻譯's mark. The drawing it was made from is dark-interface artwork — pale plates with
+    <!-- 替換翻譯's mark. The drawing it was made from is dark-interface artwork — pale plates with
          dark letters — and see DarkTheme.xaml, where it is kept exactly as drawn. It cannot be
          carried over here: 設定 sets every mark on an AppAccentSubtle tile, #DEEDFB, and pale plates
          land within a few percent of that brightness. Deepening them alone was not enough either —
@@ -142,24 +142,11 @@
         <GradientStop Offset="1" Color="#0B72B8"/>
     </LinearGradientBrush>
 
-    <!-- 快速翻譯's hint card. The surface colours of the theme, but not quite solid: the card lands
+    <!-- 替換翻譯's hint card. The surface colours of the theme, but not quite solid: the card lands
          in the middle of the user's own text, and letting a little of what is underneath through is
-         what keeps it reading as something laid over that text rather than a hole punched in it.
-         The toast above has carried the same 0.91 since it was written. -->
+         what keeps it reading as something laid over that text rather than a hole punched in it. -->
     <SolidColorBrush x:Key="HintCardBg"     Color="#E8FFFFFF"/>
     <SolidColorBrush x:Key="HintCardBorder" Color="#E8E0E0E0"/>
-
-    <!-- Toast — same in both themes (always dark) -->
-    <SolidColorBrush x:Key="ToastBg"           Color="#E8202020"/>
-    <SolidColorBrush x:Key="ToastBorder"       Color="#44FFFFFF"/>
-    <SolidColorBrush x:Key="ToastTitle"        Color="#FFFFFF"/>
-    <SolidColorBrush x:Key="ToastMessage"      Color="#CCCCCC"/>
-    <!-- Icon buttons sit on the dark toast, never on the window background, so they cannot use the
-         themed button brushes: in Light those resolve to dark-on-dark glyphs and a white hover. -->
-    <SolidColorBrush x:Key="ToastIconFg"        Color="#AAFFFFFF"/>
-    <SolidColorBrush x:Key="ToastIconFgHover"   Color="#FFFFFF"/>
-    <SolidColorBrush x:Key="ToastIconHoverBg"   Color="#22FFFFFF"/>
-    <SolidColorBrush x:Key="ToastIconPressedBg" Color="#33FFFFFF"/>
 
     <!-- Separator -->
     <SolidColorBrush x:Key="AppSeparator"      Color="#E0E0E0"/>
@@ -170,5 +157,36 @@
     <SolidColorBrush x:Key="AppScrollThumbHover"   Color="#8A8A8A"/>
     <SolidColorBrush x:Key="AppScrollThumbPressed" Color="#5F5F5F"/>
     <SolidColorBrush x:Key="AppScrollTrack"        Color="#0A000000"/>
+
+    <!-- 漫畫直排模型's card — see DarkTheme.xaml. -->
+    <LinearGradientBrush x:Key="MangaCardBg" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Offset="0" Color="#EAF3FF"/>
+        <GradientStop Offset="1" Color="#F3F8FF"/>
+    </LinearGradientBrush>
+    <RadialGradientBrush x:Key="MangaCardGlow" Center="1,0" GradientOrigin="1,0" RadiusX="1" RadiusY="1">
+        <GradientStop Offset="0"   Color="#2E3B82F6"/>
+        <GradientStop Offset="0.7" Color="#003B82F6"/>
+    </RadialGradientBrush>
+    <SolidColorBrush x:Key="MangaCardBorder"         Color="#240078D4"/>
+    <SolidColorBrush x:Key="MangaCardFg"             Color="#1B1B1F"/>
+    <SolidColorBrush x:Key="MangaCardColumn"         Color="#121B1B1F"/>
+    <SolidColorBrush x:Key="MangaCardChipBg"         Color="#0D000000"/>
+    <SolidColorBrush x:Key="MangaCardChipBorder"     Color="#14000000"/>
+    <SolidColorBrush x:Key="MangaCardFeatureBg"      Color="#99FFFFFF"/>
+    <SolidColorBrush x:Key="MangaCardFeatureBorder"  Color="#1A0078D4"/>
+    <SolidColorBrush x:Key="MangaCardFeatureDivider" Color="#12000000"/>
+    <SolidColorBrush x:Key="MangaCardFeatureIcon"    Color="#0078D4"/>
+    <SolidColorBrush x:Key="MangaCardTrack"          Color="#14000000"/>
+    <SolidColorBrush x:Key="MangaCardReadyBg"        Color="#1A34C759"/>
+    <SolidColorBrush x:Key="MangaCardReadyBorder"    Color="#4034C759"/>
+    <SolidColorBrush x:Key="MangaCardWarnBg"         Color="#1AFFB800"/>
+    <SolidColorBrush x:Key="MangaCardWarnBorder"     Color="#4DFFB800"/>
+    <SolidColorBrush x:Key="MangaCardErrorBg"        Color="#1AFF453A"/>
+    <SolidColorBrush x:Key="MangaCardErrorBorder"    Color="#4DFF453A"/>
+
+    <!-- 已套用漫畫直排模型 under the source pickers: the card's blue leaning to violet, so the one
+         line that says the models will read the page is recognisably theirs without being
+         mistaken for a link in the accent. 5.4:1 on the toolbar's #FAFAFA, for 11px text. -->
+    <SolidColorBrush x:Key="MangaHintApplied"        Color="#5856D6"/>
 
 </ResourceDictionary>

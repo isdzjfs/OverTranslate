@@ -155,12 +155,17 @@ public static class LanguageData
     public static readonly List<ProviderItem> Providers =
     [
         new(TranslationProvider.Google,    "S.Provider.Google",    false, "S.Provider.GoogleHint"),
+        new(TranslationProvider.GoogleWeb, "S.Provider.GoogleWeb", false),
         new(TranslationProvider.Google2,   "S.Provider.Google2",   false, "S.Provider.Google2Hint"),
         new(TranslationProvider.Bing,      "S.Provider.Bing",      false),
         new(TranslationProvider.Microsoft, "S.Provider.Microsoft", false),
         new(TranslationProvider.DeepL,     "S.Provider.DeepL",     true,  "S.Provider.DeepLHint"),
         new(TranslationProvider.OpenAI,    "S.Provider.OpenAI",    false, "S.Provider.OpenAIHint"),
     ];
+
+    /// <summary>Accept upstream's Beta name without changing this fork's saved endpoints.</summary>
+    public static TranslationProvider CurrentProvider(TranslationProvider provider) =>
+        provider == TranslationProvider.GoogleChrome ? TranslationProvider.Google : provider;
 
     /// <summary>
     /// Display name of a provider as shown in the selectors, for use in user-facing messages.

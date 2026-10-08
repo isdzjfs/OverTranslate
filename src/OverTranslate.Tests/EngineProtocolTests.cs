@@ -1,0 +1,602 @@
+using System.Net;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using OverTranslate.Translation;
+using OverTranslate.Translation.Bing;
+using OverTranslate.Translation.DeepL;
+using OverTranslate.Translation.Google;
+using OverTranslate.Translation.Microsoft;
+using Xunit;
+
+namespace OverTranslate.Tests;
+
+// What each engine puts on the wire and how it reads the answer, against canned responses shaped
+// like the ones measured in .ai/translation-service-analysis/. No network: the real endpoints are
+// checked by hand, and these pin what this side does with them.
+public class EngineProtocolTests
+{
+    // ---- Packing ---------------------------------------------------------------------------
+
+    [Fact]
+    public void Plan_KeepsARequestUnderTheEnginesCharacterBudget()
+    {
+        var engine = new MicrosoftTranslator(new HttpClient(new Canned()));
+        var texts = new[] { new string('a', 400), new string('b', 400), new string('c', 400) };
+
+        Assert.Equal([[0, 1], [2]], engine.Plan(texts).Select(g => g.ToArray()));
+    }
+
+    [Fact]
+    public void Plan_KeepsARequestUnderTheEnginesItemBudget()
+    {
+        var engine = new MicrosoftTranslator(new HttpClient(new Canned()));
+        var texts = Enumerable.Range(0, 30).Select(i => $"line {i}").ToArray();
+
+        var groups = engine.Plan(texts);
+
+        Assert.Equal([25, 5], groups.Select(g => g.Count));
+        Assert.Equal(Enumerable.Range(0, 30), groups.SelectMany(g => g));
+    }
+
+    [Fact]
+    public void Plan_GivesBingOneTextPerGroup()
+    {
+        var engine = new BingTranslator(new HttpClient(new Canned()));
+
+        Assert.Equal(3, engine.Plan(["a", "b", "c"]).Count);
+    }
+
+    [Fact]
+    public async Task BlankTexts_AreNotSent_AndComeBackAsThemselves()
+    {
+        var handler = new Canned(_ => Json("""[{"detectedLanguage":{"language":"en"},"translations":[{"text":"你好"}]}]"""));
+        var engine = new MicrosoftTranslator(new HttpClient(handler));
+
+        var answers = await engine.TranslateAsync(["", "Hello", "  "], "zh-TW");
+
+        Assert.Equal(["", "你好", "  "], answers.Select(a => a.Text));
+        Assert.Single(handler.Bodies);
+        Assert.Equal("""[{"Text":"Hello"}]""", handler.Bodies[0]);
+    }
+
+    [Fact]
+    public async Task ATextOverTheBudget_IsCutSentInPiecesAndJoined()
+    {
+        var handler = new Canned(request =>
+        {
+            var texts = JsonDocument.Parse(request.Body).RootElement.EnumerateArray()
+                .Select(e => e.GetProperty("Text").GetString()!).ToList();
+            return Json(JsonSerializer.Serialize(texts.Select(t => new
+            {
+                translations = new[] { new { text = $"[{t.Length}]" } },
+            })));
+        });
+        var engine = new MicrosoftTranslator(new HttpClient(handler));
+        var sentence = "The traveler walked along the quiet road and thought about home. ";
+        var text = string.Concat(Enumerable.Repeat(sentence, 30)).Trim();
+
+        var answer = Assert.Single(await engine.TranslateAsync([text], "zh-TW"));
+
+        Assert.True(handler.Bodies.Count > 1);
+        Assert.All(handler.Bodies, body => Assert.True(
+            JsonDocument.Parse(body).RootElement.EnumerateArray().Sum(e => e.GetProperty("Text").GetString()!.Length) <= 1000));
+        var piecesSent = handler.Bodies.Sum(body => JsonDocument.Parse(body).RootElement.GetArrayLength());
+        Assert.Equal(piecesSent, answer.Text.Split(' ').Length);
+    }
+
+    [Fact]
+    public async Task AnAnswerCountThatDoesNotMatch_FailsTheRequest()
+    {
+        var handler = new Canned(_ => Json("""[{"translations":[{"text":"一"}]}]"""));
+        var engine = new MicrosoftTranslator(new HttpClient(handler));
+
+        await Assert.ThrowsAsync<TranslationEngineException>(() => engine.TranslateAsync(["one", "two"], "zh-TW"));
+    }
+
+    [Fact]
+    public async Task AnHttpError_CarriesItsStatus()
+    {
+        var engine = new MicrosoftTranslator(new HttpClient(new Canned(_ => new HttpResponseMessage(HttpStatusCode.TooManyRequests))));
+
+        var failure = await Assert.ThrowsAsync<TranslationEngineException>(() => engine.TranslateAsync(["one"], "zh-TW"));
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+    }
+
+    // ---- Microsoft -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task Microsoft_SendsOneSignedArrayAndMapsItsLanguageCodes()
+    {
+        var handler = new Canned(_ => Json("""
+            [{"detectedLanguage":{"language":"zh-Hans"},"translations":[{"text":"一"}]},
+             {"detectedLanguage":{"language":"nb"},"translations":[{"text":"二"}]}]
+            """));
+        var engine = new MicrosoftTranslator(new HttpClient(handler));
+
+        var answers = await engine.TranslateAsync(["one", "two"], "zh-TW");
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal("https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=zh-Hant", request.Uri);
+        Assert.StartsWith("MSTranslatorAndroidApp::", request.Headers["X-MT-Signature"]);
+        Assert.Equal(["zh-CN", "no"], answers.Select(a => a.DetectedLanguage));
+    }
+
+    [Fact]
+    public void Microsoft_SignatureIsBoundToTheUrl()
+    {
+        var now = new DateTimeOffset(2026, 9, 27, 12, 0, 0, TimeSpan.Zero);
+        var nonce = Guid.Parse("0123456789abcdef0123456789abcdef");
+
+        var a = MicrosoftTranslator.Sign("api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=ja", now, nonce);
+        var b = MicrosoftTranslator.Sign("api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=zh-Hant", now, nonce);
+
+        Assert.NotEqual(a, b);
+        Assert.EndsWith("::Sun, 27 Sep 2026 12:00:00GMT::0123456789abcdef0123456789abcdef", a);
+    }
+
+    // ---- Google (Web) --------------------------------------------------------------------
+
+    [Fact]
+    public async Task GoogleWeb_SendsEveryTextAsItsOwnFieldAndReadsBothAnswerShapes()
+    {
+        var handler = new Canned(request => Json(request.Uri.Contains("sl=auto")
+            ? """[["你好","en"],["謝謝","iw"]]"""
+            : """["你好","謝謝"]"""));
+        var engine = new GoogleWebTranslator(new HttpClient(handler));
+
+        var detected = await engine.TranslateAsync(["Hello", "Thanks"], "zh-TW");
+        var given = await engine.TranslateAsync(["Hello", "Thanks"], "zh-TW", "en");
+
+        Assert.Equal("q=Hello&q=Thanks", handler.Bodies[0]);
+        Assert.Equal(["en", "he"], detected.Select(a => a.DetectedLanguage));
+        Assert.Equal(["你好", "謝謝"], given.Select(a => a.Text));
+        Assert.All(given, a => Assert.Equal("", a.DetectedLanguage));
+    }
+
+    // Measured 2026-09-28: this endpoint reports traditional Chinese as en; RPC and Chrome say
+    // zh-TW for the same texts. Believed, 雙語互譯 turned round on every traditional Chinese word.
+    [Theory]
+    [InlineData("測試", "en", "zh-TW")]
+    [InlineData("這個問題很難", "en", "zh-TW")]
+    [InlineData("测试", "zh-CN", "zh-CN")]
+    [InlineData("東京", "ja", "ja")]
+    [InlineData("テスト", "en", "en")]          // kana: whatever this is, it is not Chinese
+    [InlineData("這個 API 要怎麼用", "en", "en")] // a Latin letter: en may be true
+    [InlineData("123", "en", "en")]
+    [InlineData("test", "en", "en")]
+    public async Task GoogleWeb_TraditionalChineseReportedAsEnglish_IsReadAsTraditionalChinese(
+        string text, string reported, string expected)
+    {
+        var handler = new Canned(_ => Json(JsonSerializer.Serialize(new[] { new[] { "x", reported } })));
+        var engine = new GoogleWebTranslator(new HttpClient(handler));
+
+        var answer = Assert.Single(await engine.TranslateAsync([text], "en"));
+
+        Assert.Equal(expected, answer.DetectedLanguage);
+    }
+
+    // ---- Google (RPC) --------------------------------------------------------------------
+
+    [Fact]
+    public async Task GoogleRpc_MatchesAnswersByTagNotByOrder()
+    {
+        var handler = new Canned(_ => Text(")]}'\n\n" + JsonSerializer.Serialize(new object?[]
+        {
+            new object?[] { "wrb.fr", "MkEWBc", RpcData("二", "ko"), null, null, null, "2" },
+            new object?[] { "wrb.fr", "MkEWBc", RpcData("一", "ja"), null, null, null, "1" },
+            new object?[] { "di", 42 },
+        })));
+        var engine = new GoogleRpcTranslator(new HttpClient(handler));
+
+        var answers = await engine.TranslateAsync(["いち", "둘"], "zh-TW");
+
+        Assert.Single(handler.Requests);
+        Assert.Equal(["一", "二"], answers.Select(a => a.Text));
+        Assert.Equal(["ja", "ko"], answers.Select(a => a.DetectedLanguage));
+    }
+
+    [Fact]
+    public async Task GoogleRpc_ARefusedCall_FailsWithoutResending()
+    {
+        var handler = new Canned(_ => Text(")]}'\n\n" + JsonSerializer.Serialize(new object?[]
+        {
+            new object?[] { "wrb.fr", "MkEWBc", RpcData("一", "ja"), null, null, null, "1" },
+            new object?[] { "wrb.fr", "MkEWBc", null, null, null, new[] { 13 }, "2" },
+        })));
+        var engine = new GoogleRpcTranslator(new HttpClient(handler));
+        await Assert.ThrowsAsync<TranslationEngineException>(() => engine.TranslateAsync(["いち", "に"], "zh-TW"));
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task GoogleRpc_ARefusedCall_FailsTheRequest()
+    {
+        var handler = new Canned(_ => Text(")]}'\n\n" + JsonSerializer.Serialize(new object?[]
+        {
+            new object?[] { "wrb.fr", "MkEWBc", null, null, null, new[] { 13 }, "1" },
+        })));
+        var engine = new GoogleRpcTranslator(new HttpClient(handler));
+
+        await Assert.ThrowsAsync<TranslationEngineException>(() => engine.TranslateAsync(["に"], "zh-TW"));
+    }
+
+    // Seen twice from 「Google (Web)」: one line of a batch answered with nothing. Shown, it is an
+    // empty box; report the failure without resending it.
+    [Fact]
+    public async Task AnEmptyAnswer_FailsWithoutResending()
+    {
+        var handler = new Canned(_ => Json("""[["一","en"],["","en"]]"""));
+        var engine = new GoogleWebTranslator(new HttpClient(handler));
+        await Assert.ThrowsAsync<TranslationEngineException>(() => engine.TranslateAsync(["one", "two"], "zh-TW"));
+        Assert.Single(handler.Requests);
+    }
+
+    [Theory]
+    [InlineData(new[] { "連線遺失。", "重試。" }, "連線遺失。重試。")]
+    [InlineData(new[] { "Connection lost.", "Retrying." }, "Connection lost. Retrying.")]
+    [InlineData(new[] { "연결이 끊겼습니다.", "다시 시도합니다." }, "연결이 끊겼습니다. 다시 시도합니다.")]
+    public void GoogleRpc_JoinsSentencesWithASpaceOnlyWhereTheLanguageUsesOne(string[] sentences, string expected)
+    {
+        Assert.Equal(expected, GoogleRpcTranslator.JoinSentences(sentences));
+    }
+
+    // ---- Google (Chrome) -----------------------------------------------------------------
+
+    [Fact]
+    public async Task GoogleChrome_EscapesMarkupOnTheWayOutAndDecodesItOnTheWayBack()
+    {
+        var handler = new Canned(_ => Json("""[["按 &lt;A&gt; 鍵並「儲存」"],["en"]]"""));
+        var engine = new GoogleChromeTranslator(new HttpClient(handler), () => StoredKey);
+
+        var answer = Assert.Single(await engine.TranslateAsync(["Press <A> & \"save\""], "zh-TW"));
+
+        Assert.Contains("Press &lt;A&gt; &amp; &quot;save&quot;", JsonDocument.Parse(handler.Bodies[0]).RootElement[0][0][0].GetString());
+        Assert.Equal("按 <A> 鍵並「儲存」", answer.Text);
+        Assert.Equal("en", answer.DetectedLanguage);
+    }
+
+    [Fact]
+    public async Task GoogleChrome_KeepsTheBlankLineBetweenParagraphs()
+    {
+        var handler = new Canned(request =>
+        {
+            var sent = JsonDocument.Parse(request.Body).RootElement[0][0].EnumerateArray().Select(e => e.GetString()!).ToList();
+            return Json(JsonSerializer.Serialize(new object[] { sent.Select(s => $"<{s}>").ToArray() }));
+        });
+        var engine = new GoogleChromeTranslator(new HttpClient(handler), () => StoredKey);
+
+        var answer = Assert.Single(await engine.TranslateAsync(["First line\nsame paragraph.\n\nSecond paragraph."], "zh-TW"));
+
+        Assert.Equal("<First line same paragraph.>\n\n<Second paragraph.>", answer.Text);
+    }
+
+    [Fact]
+    public async Task GoogleChrome_A5xxFailsWithoutTryingAnotherHost()
+    {
+        var handler = new Canned(_ => new HttpResponseMessage(HttpStatusCode.BadGateway));
+        var engine = new GoogleChromeTranslator(new HttpClient(handler), () => StoredKey);
+        var failure = await Assert.ThrowsAsync<TranslationEngineException>(() => engine.TranslateAsync(["OK"], "zh-TW"));
+        Assert.Equal(HttpStatusCode.BadGateway, failure.StatusCode);
+        Assert.Single(handler.Requests);
+        Assert.Equal("translate-pa.googleapis.com", new Uri(handler.Requests[0].Uri).Host);
+    }
+
+    [Fact]
+    public async Task GoogleChrome_ARefusalThatIsNotTheServers_IsNotRetriedElsewhere()
+    {
+        var handler = new Canned(_ => new HttpResponseMessage(HttpStatusCode.TooManyRequests));
+        var engine = new GoogleChromeTranslator(new HttpClient(handler), () => StoredKey);
+
+        var failure = await Assert.ThrowsAsync<TranslationEngineException>(() => engine.TranslateAsync(["OK"], "zh-TW"));
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Single(handler.Requests);
+    }
+
+    // ---- Google (Chrome): the key ----------------------------------------------------------
+
+    // Shaped like the real ones, made up: the loader names the main script in JavaScript-escaped
+    // settings, and the main script holds two keys, only one of them next to translateHtml.
+    //
+    // Put together at run time because a key written out whole is one GitHub's secret scanning
+    // reports, made up or not.
+    private static readonly string StoredKey = FakeKey('S');
+    private static readonly string HtmlKey   = FakeKey('H');
+    private static readonly string OtherKey  = FakeKey('O');
+
+    private static string FakeKey(char fill) => "AI" + "za" + new string(fill, 35);
+
+    private const string Loader =
+        """c._ctkk='x';c._pas='https://';c._pbi='';c._cac='';c._cam='';c._ctlu='',c._ps="\x22translate-pa.googleapis.com\x22,\x22https:\/\/translate.googleapis.com\/_\/translate_http\/_\/js\/k\\u003dtranslate_http.tr.en.abc.O\/m\\u003del_main\x22,\x22TE_20260929\x22";""";
+
+    private const string MainScriptUrl =
+        "https://translate.googleapis.com/_/translate_http/_/js/k=translate_http.tr.en.abc.O/m=el_main";
+
+    private static readonly string MainScript =
+        "_.n.Lc=function(a,b){this.h.A.send({display_language:b,key:\"" + OtherKey + "\"},a)};" +
+        "d={host:b,path:\"/v1/translateHtml\",method:\"POST\",headers:{\"X-goog-api-key\":\"" + HtmlKey +
+        "\",\"Content-Type\":\"application/json+protobuf\"}};";
+
+    private static HttpResponseMessage RefusedKey() =>
+        new(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent(
+                """[3,"API key not valid. Please pass a valid API key.",[["type.googleapis.com/google.rpc.ErrorInfo",["API_KEY_INVALID","googleapis.com"]]]]"""),
+        };
+
+    /// <summary>The scripts, and a translateHtml that answers only <paramref name="accepted"/>.</summary>
+    private static Canned ChromeWithScripts(string accepted, string? mainScript = null) => new(request =>
+        request.Uri == GoogleChromeKeySource.LoaderUrl ? Text(Loader) :
+        request.Uri == MainScriptUrl ? Text(mainScript ?? MainScript) :
+        request.Headers.GetValueOrDefault("X-Goog-API-Key") == accepted ? Json("""[["好"],["en"]]""") :
+        RefusedKey());
+
+    [Fact]
+    public void GoogleChromeKeySource_FindsTheMainScriptInTheLoader()
+    {
+        Assert.Equal(MainScriptUrl, GoogleChromeKeySource.FindMainScript(Loader));
+    }
+
+    [Fact]
+    public void GoogleChromeKeySource_PutsTheKeyNextToTranslateHtmlFirst()
+    {
+        // The other key comes first in the script and is refused by translateHtml with a 403, so
+        // taking keys in the order they are written would pick the wrong one.
+        Assert.Equal([HtmlKey, OtherKey], GoogleChromeKeySource.FindKeys(MainScript));
+    }
+
+    [Fact]
+    public async Task GoogleChrome_AStoredKeyIsUsedWithoutLookingAnythingUp()
+    {
+        var handler = ChromeWithScripts(StoredKey);
+        var engine = new GoogleChromeTranslator(new HttpClient(handler), () => StoredKey);
+
+        Assert.Equal("好", Assert.Single(await engine.TranslateAsync(["OK"], "zh-TW")).Text);
+
+        var sent = Assert.Single(handler.Requests);
+        Assert.Equal(StoredKey, sent.Headers["X-Goog-API-Key"]);
+    }
+
+    [Fact]
+    public async Task GoogleChrome_WithNoKey_LooksItUpAndKeepsIt()
+    {
+        var handler = ChromeWithScripts(HtmlKey);
+        var kept = "";
+        var engine = new GoogleChromeTranslator(new HttpClient(handler), () => kept, key => kept = key);
+
+        Assert.Equal("好", Assert.Single(await engine.TranslateAsync(["OK"], "zh-TW")).Text);
+        Assert.Equal(HtmlKey, kept);
+
+        // Kept, so the second screen goes straight to translateHtml.
+        await engine.TranslateAsync(["OK again"], "zh-TW");
+        Assert.Equal(
+            [GoogleChromeKeySource.LoaderUrl, MainScriptUrl, "translateHtml", "translateHtml"],
+            handler.Requests.Select(r => r.Uri.Contains("/v1/translateHtml") ? "translateHtml" : r.Uri));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GoogleChrome_ARefusedKey_FailsAndRefreshesOnlyOnTheNextRequest(bool refusedStillInScript)
+    {
+        var accepted = refusedStillInScript ? OtherKey : HtmlKey;
+        var handler = ChromeWithScripts(accepted);
+        var kept = refusedStillInScript ? HtmlKey : StoredKey;
+        var engine = new GoogleChromeTranslator(new HttpClient(handler), () => kept, key => kept = key);
+        await Assert.ThrowsAsync<TranslationEngineException>(() => engine.TranslateAsync(["OK"], "zh-TW"));
+        Assert.Single(handler.Requests);
+        Assert.Equal("", kept);
+        Assert.Equal("好", Assert.Single(await engine.TranslateAsync(["OK"], "zh-TW")).Text);
+        Assert.Equal(accepted, kept);
+    }
+
+    [Fact]
+    public async Task GoogleChrome_ABadRequestThatIsNotAboutTheKey_LooksNothingUp()
+    {
+        var handler = new Canned(_ => new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent("""[3,"Invalid JSON payload received."]"""),
+        });
+        var engine = new GoogleChromeTranslator(new HttpClient(handler), () => StoredKey);
+
+        var failure = await Assert.ThrowsAsync<TranslationEngineException>(() => engine.TranslateAsync(["OK"], "zh-TW"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, failure.StatusCode);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task GoogleChrome_AFailedLookup_IsNotRepeatedOnEveryRequest()
+    {
+        // The scripts no longer have a key in them: what Google rewriting them would look like.
+        var handler = ChromeWithScripts(HtmlKey, mainScript: "nothing here");
+        var engine = new GoogleChromeTranslator(new HttpClient(handler));
+
+        await Assert.ThrowsAsync<TranslationEngineException>(() => engine.TranslateAsync(["OK"], "zh-TW"));
+        await Assert.ThrowsAsync<TranslationEngineException>(() => engine.TranslateAsync(["OK"], "zh-TW"));
+
+        // Realtime translation sends a request every few seconds, and each lookup is 300 KB.
+        Assert.Equal([GoogleChromeKeySource.LoaderUrl, MainScriptUrl], handler.Requests.Select(r => r.Uri));
+    }
+
+    // ---- Bing ----------------------------------------------------------------------------
+
+    private const string BingPage =
+        """<html><script>var params_AbusePreventionHelper = [1727400000000,"TOKEN0123456789abcdef0123456789ab",3600000];IG:"ABCDEF0123"</script><div data-iid="translator.5077"></div></html>""";
+
+    [Fact]
+    public async Task Bing_FetchesItsCredentialsOnceForEveryText()
+    {
+        var handler = new Canned(request => request.Uri.EndsWith("/translator")
+            ? Text(BingPage)
+            : Json("""[{"detectedLanguage":{"language":"ja"},"translations":[{"text":"快逃！"}],"usedLLM":true}]"""));
+        var engine = new BingTranslator(new HttpClient(handler));
+
+        var answers = await engine.TranslateAsync(["早く逃げて！", "逃げて", "走れ"], "zh-TW");
+
+        Assert.Equal(1, handler.Requests.Count(r => r.Uri.EndsWith("/translator")));
+        Assert.Equal(3, handler.Requests.Count(r => r.Uri.Contains("/ttranslatev3")));
+        Assert.All(answers, a => Assert.Equal("ja", a.DetectedLanguage));
+        Assert.Contains(handler.Bodies, body => body.Contains("to=zh-Hant") && body.Contains("key=1727400000000"));
+    }
+
+    // Bing reports its errors inside a 200.
+    [Fact]
+    public async Task Bing_AnErrorInsideA200_IsAFailure()
+    {
+        var handler = new Canned(request => request.Uri.EndsWith("/translator")
+            ? Text(BingPage)
+            : Json("""{"statusCode":400,"errorMessage":""}"""));
+        var engine = new BingTranslator(new HttpClient(handler));
+
+        var failure = await Assert.ThrowsAsync<TranslationEngineException>(() => engine.TranslateAsync(["x"], "zh-TW"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, failure.StatusCode);
+    }
+
+    [Fact]
+    public async Task Bing_CredentialsRefusedForAnythingButTheText_AreFetchedAgain()
+    {
+        var refused = true;
+        var handler = new Canned(request =>
+        {
+            if (request.Uri.EndsWith("/translator")) return Text(BingPage);
+            if (refused) { refused = false; return Json("""{"statusCode":205}"""); }
+            return Json("""[{"translations":[{"text":"好"}]}]""");
+        });
+        var engine = new BingTranslator(new HttpClient(handler));
+
+        await Assert.ThrowsAsync<TranslationEngineException>(() => engine.TranslateAsync(["OK"], "zh-TW"));
+        await engine.TranslateAsync(["OK"], "zh-TW");
+
+        Assert.Equal(2, handler.Requests.Count(r => r.Uri.EndsWith("/translator")));
+    }
+
+    // ---- DeepL ---------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("abc:fx", "https://api-free.deepl.com/v2/translate")]
+    [InlineData("abc", "https://api.deepl.com/v2/translate")]
+    public async Task DeepL_SendsTheKeyToTheHostItBelongsTo(string key, string endpoint)
+    {
+        var handler = new Canned(_ => Json("""{"translations":[{"detected_source_language":"EN","text":"你好"}]}"""));
+        var engine = new DeepLTranslator(new HttpClient(handler), key);
+
+        await engine.TranslateAsync(["Hello"], "zh-TW");
+
+        var sent = Assert.Single(handler.Requests);
+        Assert.Equal(endpoint, sent.Uri);
+        Assert.Equal($"DeepL-Auth-Key {key}", sent.Headers["Authorization"]);
+    }
+
+    [Fact]
+    public async Task DeepL_SendsEveryTextInOneRequest_AndReadsTheDetectedLanguageBack()
+    {
+        var handler = new Canned(_ => Json("""
+            {"translations":[
+              {"detected_source_language":"JA","text":"你好"},
+              {"detected_source_language":"ZH","text":"世界"}]}
+            """));
+        var engine = new DeepLTranslator(new HttpClient(handler), "k");
+
+        var answers = await engine.TranslateAsync(["こんにちは", "世界"], "zh-TW");
+
+        Assert.Equal("text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&text=%E4%B8%96%E7%95%8C&target_lang=ZH-HANT",
+            Assert.Single(handler.Bodies));
+        Assert.Equal([("你好", "ja"), ("世界", "zh-CN")], answers.Select(a => (a.Text, a.DetectedLanguage)));
+    }
+
+    // The app offers American English and Brazilian Portuguese as targets; DeepL's source list has
+    // one Chinese and no variants at all.
+    [Theory]
+    [InlineData("en", "zh-TW", "source_lang=ZH&target_lang=EN-US")]
+    [InlineData("pt", "zh-CN", "source_lang=ZH&target_lang=PT-BR")]
+    [InlineData("zh-CN", "no", "source_lang=NB&target_lang=ZH-HANS")]
+    public async Task DeepL_WritesLanguagesTheWayItsApiWantsThem(string target, string source, string expected)
+    {
+        var handler = new Canned(_ => Json("""{"translations":[{"text":"x"}]}"""));
+        var engine = new DeepLTranslator(new HttpClient(handler), "k");
+
+        await engine.TranslateAsync(["a"], target, source);
+
+        Assert.EndsWith(expected, Assert.Single(handler.Bodies));
+    }
+
+    [Fact]
+    public void DeepL_PacksAtMostFiftyTextsARequest()
+    {
+        var engine = new DeepLTranslator(new HttpClient(new Canned()), "k");
+
+        Assert.Equal([50, 10], engine.Plan(Enumerable.Range(0, 60).Select(i => $"line {i}").ToArray()).Select(g => g.Count));
+    }
+
+    [Fact]
+    public async Task DeepL_ARefusedKey_IsAnEngineFailureWithItsStatus()
+    {
+        var engine = new DeepLTranslator(new HttpClient(new Canned(_ => new HttpResponseMessage(HttpStatusCode.Forbidden))), "k");
+
+        var failure = await Assert.ThrowsAsync<TranslationEngineException>(() => engine.TranslateAsync(["a"], "ja"));
+
+        Assert.Equal(HttpStatusCode.Forbidden, failure.StatusCode);
+    }
+
+    // ---- Transport -----------------------------------------------------------------------
+
+    // Concurrent requests share one connection per host instead of one each; see EngineHttp.
+    [Fact]
+    public async Task EveryRequest_IsOfferedHttp2()
+    {
+        var inner = new Canned(_ => Json("[]"));
+        var client = new HttpClient(new EngineHttp.PreferHttp2Handler(inner));
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "https://example.com/") { Version = HttpVersion.Version11 };
+        await client.SendAsync(request);
+
+        var sent = Assert.Single(inner.Requests);
+        Assert.Equal(HttpVersion.Version20, sent.Version);
+        Assert.Equal(HttpVersionPolicy.RequestVersionOrLower, sent.Policy);
+    }
+
+    // ---- Helpers -------------------------------------------------------------------------
+
+    private static string RpcData(string translation, string detected) => JsonSerializer.Serialize(new object?[]
+    {
+        null,
+        new object?[]
+        {
+            new object?[] { new object?[] { null, null, null, null, null, new object?[] { new object?[] { translation } } } },
+            "zh-TW", 1, "auto",
+        },
+        detected,
+    });
+
+    private static HttpResponseMessage Json(string body) =>
+        new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+
+    private static HttpResponseMessage Text(string body) =>
+        new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "text/html") };
+
+    private sealed record SentRequest(
+        string Uri, string Body, Dictionary<string, string> Headers, Version Version, HttpVersionPolicy Policy);
+
+    /// <summary>Answers every request from a function, remembering what was asked.</summary>
+    private sealed class Canned(Func<SentRequest, HttpResponseMessage>? answer = null) : HttpMessageHandler
+    {
+        private readonly List<SentRequest> _requests = [];
+
+        public IReadOnlyList<SentRequest> Requests { get { lock (_requests) return [.. _requests]; } }
+
+        public IReadOnlyList<string> Bodies => Requests.Where(r => r.Body.Length > 0).Select(r => r.Body).ToList();
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken);
+            var headers = request.Headers.ToDictionary(h => h.Key, h => string.Join(",", h.Value));
+            var sent = new SentRequest(request.RequestUri!.ToString(), body, headers, request.Version, request.VersionPolicy);
+            lock (_requests) _requests.Add(sent);
+            return (answer ?? (_ => Json("[]")))(sent);
+        }
+    }
+}

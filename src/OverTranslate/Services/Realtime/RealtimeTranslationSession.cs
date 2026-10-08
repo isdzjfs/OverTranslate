@@ -447,7 +447,7 @@ public sealed class RealtimeTranslationSession
                     //
                     // Debug rather than Info because this fires once per poll that saw the pixels
                     // move: at a 150ms poll that is under 7/s per region, three regions, ~10MB an
-                    // hour against a 12MB archive budget. A session over a video used to evict every
+                    // hour against a 15MB archive budget. A session over a video used to evict every
                     // other line in the log — including the startup snapshot and whatever the user
                     // actually opened the log
                     // for. It sat at Info because Debug needed an environment variable nobody was
@@ -563,16 +563,26 @@ public sealed class RealtimeTranslationSession
         // the size of its input and not smoothly, so the same picture read again at another size
         // puts balloons together that the first size left in pieces — and this read was happening
         // anyway, reading the identical picture at the identical size for the identical answer.
-        var readingAgain = false;
-        if (region.Orientation == RealtimeTextOrientation.Vertical && state.ReadingAgain &&
-            Ocr.VerticalSecondLook.OtherSize(frame.Width, frame.Height, primarySize) is { } otherSize)
-        {
-            primarySize = otherSize;
-            readingAgain = true;
-        }
+        //
+        // Not when the manga models read the page. Their detector sees the whole frame at 640×640
+        // whatever size is asked for, so there is no other geometry to ask with: MEASURED, reading
+        // the same frame twice returned the identical page on all 46 transcribed pages, and merging
+        // the two changed nothing. The previous reading is the answer, without a second GPU pass.
+        var columnsAgain = region.Orientation == RealtimeTextOrientation.Vertical && state.ReadingAgain;
+        var mangaModels = columnsAgain && _ocr.ReadsVerticalWithMangaModels(sourceLanguage);
+        var otherSize = columnsAgain && !mangaModels
+            ? Ocr.VerticalSecondLook.OtherSize(frame.Width, frame.Height, primarySize)
+            : null;
+        var confirmation = ChooseConfirmationRead(
+            columnsAgain, mangaModels, otherSize is not null, state.SamePictureAsRead);
+        var readingAgain = confirmation == ConfirmationRead.OtherSize;
+        var sameAsLastRead = confirmation == ConfirmationRead.ReuseLastRead;
+        if (readingAgain) primarySize = otherSize!.Value;
 
-        var recognized = await _ocr.TryRecognizeAsync(
-            frame, sourceLanguage, primarySize, token, region.Mode, region.Orientation);
+        List<OcrTextBlock>? recognized = sameAsLastRead
+            ? [.. state.LastRead]
+            : await _ocr.TryRecognizeAsync(
+                frame, sourceLanguage, primarySize, token, region.Mode, region.Orientation);
         if (recognized is null)
         {
             state.Dialogue.RecognitionUnavailable();
@@ -696,7 +706,7 @@ public sealed class RealtimeTranslationSession
         // thrown away because the line beside it had wobbled; see RealtimeReadingMerge.
         var merged = region.Mode == RealtimeBlockMode.Subtitle
             ? state.Dialogue.Merge(state.RenderedLines, recognized)
-            : RealtimeReadingMerge.Merge(state.RenderedLines, recognized);
+            : state.Dialogue.MergePanel(state.RenderedLines, recognized);
         var shownBefore = state.RenderedText.Length;
 
         // Whether this pass read the region differently at all, as opposed to reading it the same
@@ -860,6 +870,24 @@ public sealed class RealtimeTranslationSession
             (int)Math.Ceiling(block.Bounds.Bottom)))
     ];
 
+    internal enum ConfirmationRead { Recognise, ReuseLastRead, OtherSize }
+
+    /// <summary>How a pass reads its picture, given what kind of second reading it is.</summary>
+    /// <remarks>
+    /// The other detector size comes first: on a page of columns it is new information, not a
+    /// repeat. Past that, a confirmation over the identical picture can only give back what the last
+    /// pass read, so that is the answer and the recognition is saved — measured as the second of
+    /// the two reads every small scroll costs. It only ever spares a read: any cell that moved, and
+    /// the pass reads as it always did.
+    /// </remarks>
+    internal static ConfirmationRead ChooseConfirmationRead(
+        bool columnsAgain, bool mangaModels, bool hasOtherSize, bool samePicture)
+    {
+        if (columnsAgain && !mangaModels && hasOtherSize) return ConfirmationRead.OtherSize;
+        if (columnsAgain && mangaModels) return ConfirmationRead.ReuseLastRead;
+        return samePicture ? ConfirmationRead.ReuseLastRead : ConfirmationRead.Recognise;
+    }
+
     /// <summary>
     /// Translates only the lines the session has not seen before, then reassembles the full result
     /// in the original order so the overlay always receives every line it has to draw.
@@ -894,11 +922,16 @@ public sealed class RealtimeTranslationSession
 
             // Providers answer in request order; pair defensively anyway so a short reply degrades
             // to an untranslated line rather than throwing away the whole pass.
+            //
+            // A line no engine translated is not cached: the cache outlives a pause, so the original
+            // text stored as its answer would be drawn for that line for the rest of the session.
+            // Failed text is not requested again until content changes or the user resumes.
             for (int i = 0; i < missing.Count && i < results.Count; i++)
-                _translationCache.Set(
-                    cacheKeyPrefix + missing[i].Text,
-                    results[i].TranslatedText,
-                    generation);
+                if (!results[i].Untranslated)
+                    _translationCache.Set(
+                        cacheKeyPrefix + missing[i].Text,
+                        results[i].TranslatedText,
+                        generation);
         }
 
         // A pause may have landed while the provider was answering. Its result belongs to a screen
@@ -906,15 +939,23 @@ public sealed class RealtimeTranslationSession
         if (!_translationCache.IsCurrent(generation)) return null;
 
         return blocks
-            .Select(block => new TranslatedBlock(
-                block.Text,
-                _translationCache.TryGet(
-                    cacheKeyPrefix + block.Text, generation, out var translated)
-                        ? translated
-                        : block.Text,
-                block.Bounds,
-                block.SourceLineBounds,
-                block.RenderGlyphHeight) { RunsAcross = block.RunsAcross })
+            .Select(block =>
+            {
+                var found = _translationCache.TryGet(
+                    cacheKeyPrefix + block.Text, generation, out var translated);
+                return new TranslatedBlock(
+                    block.Text,
+                    found ? translated : block.Text,
+                    block.Bounds,
+                    block.SourceLineBounds,
+                    block.RenderGlyphHeight)
+                {
+                    RunsAcross = block.RunsAcross,
+                    FontGlyphHeight = block.FontGlyphHeight,
+                    Tilt = block.Tilt,
+                    Untranslated = !found,
+                };
+            })
             .ToList();
     }
 
@@ -922,7 +963,7 @@ public sealed class RealtimeTranslationSession
     {
         InvalidOperationException => ex.Message,
         NotSupportedException => ex.Message,
-        _ => LocalizationService.Format("S.Realtime.RetryingAfterFailure", ex.Message)
+        _ => LocalizationService.Format("S.Realtime.TranslationFailed", ex.Message)
     };
 
     /// <summary>
@@ -952,6 +993,7 @@ public sealed class RealtimeTranslationSession
         private readonly RealtimePublishOrder _order = new();
 
         private int _retryRequested;
+        private readonly RealtimeTranslationFailureGate _failures = new();
 
         /// <summary>Claims the number identifying this pass in the order the region was read.</summary>
         public long NextPass() => _order.NextPass();
@@ -959,6 +1001,8 @@ public sealed class RealtimeTranslationSession
         /// <summary>Translates a pass's lines and draws them, both without holding up the caller.</summary>
         public void Post(long pass, List<OcrTextBlock> blocks, int ocrMs)
         {
+            var generation = session._translationCache.Generation;
+            if (_failures.ShouldSkip(blocks.Select(block => block.Text), generation)) return;
             if (!session._translationSlots.Wait(0))
             {
                 // Every slot is held by a translation that has not answered, so the provider is
@@ -984,8 +1028,6 @@ public sealed class RealtimeTranslationSession
             // Captured after OCR. If a pause arrives from here onward, this pass is stale and both
             // TranslateAsync and the pre-publish check below refuse to let it repopulate the cache or
             // reach the screen.
-            var generation = session._translationCache.Generation;
-
             // Not Task.Run(_, token): a token already cancelled skips the body entirely, and the
             // slot taken out above would never be given back.
             _ = Task.Run(async () =>
@@ -1007,9 +1049,17 @@ public sealed class RealtimeTranslationSession
                     // Both per pass, so both track the content's rate of change — see the read line
                     // in RunRegionAsync for why that cannot sit at Info.
                     if (Publish(pass, translated, generation))
+                    {
                         Log.Debug(
                             "Realtime pass region={Region} ocr={Ocr}ms translate={Translate}ms lines={Lines}",
                             region.Id, ocrMs, translateMs, translated.Count);
+
+                        if (translated.Any(line => line.Untranslated))
+                        {
+                            _failures.Record(blocks.Select(block => block.Text), generation);
+                            Report(LocalizationService.Get("S.Error.NotTranslated"));
+                        }
+                    }
                     else
                         // Worth its own line: it means the region changed again before this answer
                         // arrived, which is the shape of a provider too slow for the content.
@@ -1024,8 +1074,8 @@ public sealed class RealtimeTranslationSession
                 catch (Exception ex)
                 {
                     Log.Warn(ex, "Realtime translation failed for region {Region}", region.Id);
+                    _failures.Record(blocks.Select(block => block.Text), generation);
                     Report(DescribeFailure(ex));
-                    RequestRetry();
                 }
                 finally
                 {

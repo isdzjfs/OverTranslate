@@ -26,7 +26,7 @@ internal sealed class CaptureTranslationCache
         string targetLanguage,
         Func<List<OcrTextBlock>, Task<List<TranslatedBlock>>> translateMissing)
     {
-        var answers = new Dictionary<string, string>(StringComparer.Ordinal);
+        var answers = new Dictionary<string, (string Text, bool Untranslated)>(StringComparer.Ordinal);
         var missing = new List<OcrTextBlock>();
         var missingTexts = new HashSet<string>(StringComparer.Ordinal);
         var hits = 0;
@@ -36,7 +36,7 @@ internal sealed class CaptureTranslationCache
             var key = new Key(provider, sourceLanguage, targetLanguage, block.Text);
             if (TryGet(key, out var answer))
             {
-                answers[block.Text] = answer;
+                answers[block.Text] = (answer, false);
                 hits++;
             }
             else if (missingTexts.Add(block.Text))
@@ -57,16 +57,20 @@ internal sealed class CaptureTranslationCache
             {
                 var text = missing[i].Text;
                 var answer = translated[i].TranslatedText;
-                answers[text] = answer;
-                Set(new Key(provider, sourceLanguage, targetLanguage, text), answer);
+                answers[text] = (answer, translated[i].Untranslated);
+                if (!translated[i].Untranslated)
+                    Set(new Key(provider, sourceLanguage, targetLanguage, text), answer);
             }
         }
 
         // Geometry belongs to this screenshot, even when its text was translated in an earlier one.
         var result = blocks.Select(block => new TranslatedBlock(
-            block.Text, answers[block.Text], block.Bounds, block.Lines, block.RenderGlyphHeight)
+            block.Text, answers[block.Text].Text, block.Bounds, block.SourceLineBounds, block.RenderGlyphHeight)
         {
-            RunsAcross = block.RunsAcross
+            RunsAcross = block.RunsAcross,
+            FontGlyphHeight = block.FontGlyphHeight,
+            Tilt = block.Tilt,
+            Untranslated = answers[block.Text].Untranslated
         }).ToList();
         return (result, hits, missing.Count);
     }

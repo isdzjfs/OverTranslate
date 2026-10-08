@@ -13,6 +13,7 @@
 """
 import hashlib
 import io
+import json
 import os
 import re
 import sys
@@ -22,19 +23,20 @@ DOCS = os.path.join(ROOT, 'docs')
 SOURCE = os.path.join(DOCS, 'index.html')
 I18N_DIR = os.path.join(ROOT, 'tools', 'site-i18n')
 BASE_URL = 'https://hon-lu.github.io/OverTranslate/'
+MAX_DESCRIPTION = 160
 
 # 每個語言：輸出目錄、<html lang>、截圖後綴、下載統計圖卡、README 與 Ollama 教學
 LANGS = [
     ('zh-TW',   'zh-TW',   'zh-Hant',  '',          'overtranslate-downloads-history.zh-TW.svg',
-     'README.md',                'docs/guides/OLLAMA_GUIDE.md'),
+     'README.zh-Hant.md',        'docs/guides/OLLAMA_GUIDE.md'),
     ('en',      'en',      'en',       '_en',       'overtranslate-downloads-history.svg',
-     'docs/README.en.md',        'docs/guides/OLLAMA_GUIDE.en.md'),
+     'README.md',                'docs/guides/OLLAMA_GUIDE.en.md'),
     ('zh-Hans', 'zh-Hans', 'zh-Hans',  '_zh-Hans',  'overtranslate-downloads-history.svg',
-     'docs/README.zh-Hans.md',   'docs/guides/OLLAMA_GUIDE.zh-Hans.md'),
+     'README.zh-Hans.md',        'docs/guides/OLLAMA_GUIDE.zh-Hans.md'),
     ('ja',      'ja',      'ja',       '_jp',       'overtranslate-downloads-history.svg',
-     'docs/README.ja.md',        'docs/guides/OLLAMA_GUIDE.ja.md'),
+     'README.ja.md',             'docs/guides/OLLAMA_GUIDE.ja.md'),
     ('ko',      'ko',      'ko',       '_ko',       'overtranslate-downloads-history.svg',
-     'docs/README.ko.md',        'docs/guides/OLLAMA_GUIDE.ko.md'),
+     'README.ko.md',             'docs/guides/OLLAMA_GUIDE.ko.md'),
 ]
 LANG_LABEL = {'en': 'English', 'zh-TW': '繁體中文', 'zh-Hans': '简体中文',
               'ja': '日本語', 'ko': '한국어'}
@@ -160,6 +162,31 @@ def apply_head(html, lang, html_lang, canonical, og_url, og_image, is_root=False
     return html
 
 
+def apply_jsonld(html, html_lang, url, description):
+    """結構化資料：讓搜尋引擎知道這頁介紹的是一個 Windows 免費軟體。"""
+    data = {
+        '@context': 'https://schema.org',
+        '@type': 'SoftwareApplication',
+        'name': 'OverTranslate',
+        'applicationCategory': 'UtilitiesApplication',
+        'operatingSystem': 'Windows 10, Windows 11',
+        'offers': {'@type': 'Offer', 'price': '0', 'priceCurrency': 'USD'},
+        'downloadUrl': 'https://github.com/Hon-Lu/OverTranslate/releases/latest',
+        'url': url,
+        'description': description,
+        'inLanguage': html_lang,
+        'sameAs': ['https://github.com/Hon-Lu/OverTranslate'],
+    }
+    # 內容放在 <script> 裡，"</" 要拆開才不會提早結束標籤
+    body = json.dumps(data, ensure_ascii=False).replace('</', '<\\/')
+    tag = '<script type="application/ld+json">%s</script>' % body
+    html, n = re.subn(r'<script type="application/ld\+json">.*?</script>',
+                      lambda _: tag, html, count=1, flags=re.S)
+    if not n:
+        raise SystemExit('正本 <head> 裡找不到 application/ld+json 的 <script>')
+    return html
+
+
 def apply_lang_links(html, depth, current):
     """語言切換改成實際連結：各語言一個目錄，不再靠 JS 換字。"""
     up = '../' * depth
@@ -237,6 +264,11 @@ def build():
         missing = [k for k in zh if k not in strings]
         if missing:
             raise SystemExit('%s 缺少 %d 個 key：%s' % (lang, len(missing), missing[:5]))
+        # Bing 會把超過 160 字的 description 標成錯誤
+        desc_len = len(strings['meta.description'])
+        if desc_len > MAX_DESCRIPTION:
+            raise SystemExit('%s 的 meta.description 有 %d 字，上限 %d'
+                             % (lang, desc_len, MAX_DESCRIPTION))
 
         page = apply_text(src, strings)
         page = apply_assets(page, suffix, statcard, readme, ollama)
@@ -256,12 +288,15 @@ def build():
         page = re.sub(r'<meta property="og:title" content="[^"]*" />',
                       '<meta property="og:title" content="%s" />' % strings['meta.title'],
                       page, count=1)
+        page = apply_jsonld(page, html_lang, '%s%s/' % (BASE_URL, folder),
+                            strings['meta.description'])
         pages[os.path.join(DOCS, folder, 'index.html')] = page
 
     # 根目錄仍是繁中內容，但 canonical 指向 /zh-TW/，避免兩個網址互搶
     root = apply_head(src, 'zh-TW', 'zh-Hant', BASE_URL + 'zh-TW/', BASE_URL,
                       BASE_URL + 'images/og/og.png', is_root=True)
     root = apply_lang_links(root, 0, 'zh-TW')
+    root = apply_jsonld(root, 'zh-Hant', BASE_URL + 'zh-TW/', zh['meta.description'])
     pages[SOURCE] = root
     return pages
 

@@ -7,7 +7,7 @@
 
          Written as Japanese software rather than as a translation of the Chinese: the sentences
          are rebuilt, not reordered word by word. Feature names are fixed — キャプチャ翻訳,
-         クイック辞書, クイック翻訳, リアルタイム翻訳, テキスト翻訳, フローティングバー — and a
+         ポップアップ翻訳, 置換翻訳, リアルタイム翻訳, テキスト翻訳, フローティングバー — and a
          screen that invents its own wording for one of them is the thing to catch in review. -->
 
     <!-- ── Shared ── -->
@@ -26,7 +26,7 @@
     <sys:String x:Key="S.Shell.About">このアプリについて</sys:String>
     <sys:String x:Key="S.Shell.QuickTools">クイックツール</sys:String>
     <sys:String x:Key="S.Shell.CaptureTranslate">キャプチャ翻訳</sys:String>
-    <sys:String x:Key="S.Shell.QuickLookup">クイック辞書</sys:String>
+    <sys:String x:Key="S.Shell.QuickLookup">ポップアップ翻訳</sys:String>
     <sys:String x:Key="S.Shell.TextTranslate">テキスト翻訳</sys:String>
     <sys:String x:Key="S.Shell.RealtimeTranslate">リアルタイム翻訳</sys:String>
     <sys:String x:Key="S.Shell.Settings">設定</sys:String>
@@ -35,7 +35,7 @@
     <sys:String x:Key="S.Shell.Pin">ウィンドウを常に手前に表示します</sys:String>
     <sys:String x:Key="S.Shell.Unpin">ピン留めを解除</sys:String>
     <sys:String x:Key="S.Shell.CaptureBlockedByRealtimeFraming">ブロックを選択中です。「開始」を押してからキャプチャ翻訳をご利用ください</sys:String>
-    <sys:String x:Key="S.Shell.QuickLookupBlockedByRealtime">リアルタイム翻訳の実行中です。終了してからクイック辞書をご利用ください</sys:String>
+    <sys:String x:Key="S.Shell.QuickLookupBlockedByRealtime">リアルタイム翻訳の実行中です。終了してからポップアップ翻訳をご利用ください</sys:String>
     <sys:String x:Key="S.Shell.UpdateAvailable">v{0} にアップデート</sys:String>
 
     <!-- ── Tray menu ── -->
@@ -84,6 +84,7 @@
     <sys:String x:Key="S.Error.OpenAiHttp">OpenAI 互換 API が {0} を返しました：{1}</sys:String>
     <sys:String x:Key="S.Error.OpenAiUnparsable">OpenAI 互換 API の応答を解析できませんでした。</sys:String>
     <sys:String x:Key="S.Error.OpenAiNoTranslation">OpenAI 互換 API から訳文が返りませんでした。</sys:String>
+    <sys:String x:Key="S.Error.OpenAiTimeout">OpenAI 互換 API から {0} 秒以内に応答がありませんでした。翻訳サービス設定でタイムアウトの秒数を変更できます。</sys:String>
     <sys:String x:Key="S.Error.OpenAiBadUrl">OpenAI 互換 API のアドレスは有効な HTTP または HTTPS の URL である必要があります。</sys:String>
     <sys:String x:Key="S.Error.OpenAiNoModel">モデル名が設定されていません。翻訳サービス設定で使用するモデルを入力してください。</sys:String>
     <sys:String x:Key="S.Error.UnknownError">不明なエラー</sys:String>
@@ -92,6 +93,7 @@
     <sys:String x:Key="S.Error.OcrSwapTimeout">OCR モデルの切り替えのため他の認識の完了を待ちましたが、タイムアウトしました。</sys:String>
     <sys:String x:Key="S.Error.OcrImageConvert">画像を ONNX OCR が読める形式に変換できませんでした。</sys:String>
     <sys:String x:Key="S.Error.OcrModelMissing">OCR モデルファイルが見つかりません：{0}</sys:String>
+    <sys:String x:Key="S.Error.NotTranslated">未翻訳</sys:String>
 
     <!-- ── Text translation page ── -->
     <sys:String x:Key="S.Translation.Title">テキスト翻訳</sys:String>
@@ -113,7 +115,7 @@
     <sys:String x:Key="S.Translation.Translating">翻訳中…</sys:String>
     <sys:String x:Key="S.Translation.SpeakFailed">読み上げに失敗しました：{0}</sys:String>
 
-    <!-- ── Quick translate ── Only ever seen on the hint card, so each line stays to one: it sits
+    <!-- ── In-place translation ── Only ever seen on the hint card, so each line stays to one: it sits
          over the window the reader is working in. -->
     <sys:String x:Key="S.QuickTranslate.Replaced">翻訳して貼り付けました。</sys:String>
     <sys:String x:Key="S.QuickTranslate.EmptyResult">訳文が空でした。元のテキストはそのままです。</sys:String>
@@ -140,7 +142,7 @@
 
     <!-- ── Quick lookup popup ── -->
     <sys:String x:Key="S.QuickLookup.Placeholder">翻訳したいテキストを入力…</sys:String>
-    <sys:String x:Key="S.QuickLookup.Settings">クイック辞書の設定</sys:String>
+    <sys:String x:Key="S.QuickLookup.Settings">ポップアップ翻訳の設定</sys:String>
     <sys:String x:Key="S.QuickLookup.BackToResult">翻訳結果に戻る</sys:String>
     <sys:String x:Key="S.QuickLookup.Pin">ピン留めするとウィンドウが自動で閉じなくなります</sys:String>
     <sys:String x:Key="S.QuickLookup.Unpin">ピン留めを解除</sys:String>
@@ -184,6 +186,9 @@
     <sys:String x:Key="S.Toolbar.AnnotateHint">選択範囲に書き込む</sys:String>
     <sys:String x:Key="S.Annotate.Pen">ペン</sys:String>
     <sys:String x:Key="S.Annotate.Highlighter">蛍光ペン</sys:String>
+    <sys:String x:Key="S.Annotate.Line">直線</sys:String>
+    <sys:String x:Key="S.Annotate.Rectangle">四角</sys:String>
+    <sys:String x:Key="S.Annotate.Ellipse">楕円</sys:String>
     <sys:String x:Key="S.Annotate.Eraser">消しゴム</sys:String>
     <sys:String x:Key="S.Annotate.Undo">元に戻す</sys:String>
     <sys:String x:Key="S.Annotate.Redo">やり直す</sys:String>
@@ -237,7 +242,7 @@
     <sys:String x:Key="S.Main.MinimizedBody">タスクトレイに最小化しました。{0} でキャプチャ翻訳を開始できます。</sys:String>
     <sys:String x:Key="S.Main.DefaultShortcutName">設定したショートカットキー</sys:String>
     <sys:String x:Key="S.Main.RealtimeRunningTitle">リアルタイム翻訳の実行中</sys:String>
-    <sys:String x:Key="S.Main.RealtimeRunningBody">リアルタイム翻訳を終了してからクイック辞書をご利用ください。</sys:String>
+    <sys:String x:Key="S.Main.RealtimeRunningBody">リアルタイム翻訳を終了してからポップアップ翻訳をご利用ください。</sys:String>
     <sys:String x:Key="S.Main.MissingApiKeyTitle">API キーがありません</sys:String>
     <sys:String x:Key="S.Main.MissingApiKeyBody">設定で API キーを入力してください。</sys:String>
     <sys:String x:Key="S.Main.RecogniseFailedTitle">認識に失敗しました</sys:String>
@@ -328,6 +333,15 @@
     <sys:String x:Key="S.Realtime.EditBlocks">ブロックを編集</sys:String>
     <sys:String x:Key="S.Realtime.CrosshairOff">範囲選択を止めて下のアプリを操作する</sys:String>
     <sys:String x:Key="S.Realtime.CrosshairOn">範囲選択を再開</sys:String>
+    <sys:String x:Key="S.Realtime.CompareDisplay">原文対照</sys:String>
+    <sys:String x:Key="S.Realtime.CompareDisplayOn">オン</sys:String>
+    <sys:String x:Key="S.Realtime.CompareDisplayOff">オフ</sys:String>
+    <sys:String x:Key="S.Realtime.CompareDisplayOnHint">原文対照：オフにすると、訳文を原文の画面に直接重ねて表示します</sys:String>
+    <sys:String x:Key="S.Realtime.CompareDisplayOffHint">原文対照：オンにすると、原文の画面をそのまま残し、訳文を対照エリアに表示します</sys:String>
+    <sys:String x:Key="S.Realtime.CompareCopyHint">ドラッグで対照枠を移動、ラベルをダブルクリックすると自動の位置に戻ります</sys:String>
+    <sys:String x:Key="S.Realtime.CompareHideBlock">このブロックの原文対照をオフ</sys:String>
+    <sys:String x:Key="S.Realtime.CompareShowBlock">このブロックの原文対照を表示</sys:String>
+    <sys:String x:Key="S.Realtime.CompareCopyCenter">訳文の表示位置</sys:String>
     <sys:String x:Key="S.Realtime.CrosshairOffHint">範囲選択を止めました。下のアプリをそのまま操作できます</sys:String>
 
     <!-- Control bar and edit window messages -->
@@ -381,13 +395,14 @@
     <!-- Session failures -->
     <sys:String x:Key="S.Realtime.SessionAborted">リアルタイム翻訳を中止しました：{0}</sys:String>
     <sys:String x:Key="S.Realtime.MissingApiKey">API キーがありません。先に設定で入力してください。</sys:String>
-    <sys:String x:Key="S.Realtime.RetryingAfterFailure">翻訳が一時的に失敗しました。再試行を続けます：{0}</sys:String>
+    <sys:String x:Key="S.Realtime.TranslationFailed">翻訳に失敗しました：{0}</sys:String>
 
     <!-- ── Translation providers ── -->
     <sys:String x:Key="S.Provider.Google">Google 翻訳 (Google2)</sys:String>
     <sys:String x:Key="S.Provider.GoogleHint">ReVanced と同じ translateHtml インターフェース</sys:String>
     <sys:String x:Key="S.Provider.Google2">Google 翻訳 (RPC)</sys:String>
     <sys:String x:Key="S.Provider.Google2Hint">新しい RPC インターフェース</sys:String>
+    <sys:String x:Key="S.Provider.GoogleWeb">Google 翻訳 (標準)</sys:String>
     <sys:String x:Key="S.Provider.Bing">Bing 翻訳</sys:String>
     <sys:String x:Key="S.Provider.Microsoft">Microsoft 翻訳</sys:String>
     <sys:String x:Key="S.Provider.DeepL">DeepL 翻訳</sys:String>
@@ -410,14 +425,14 @@
     <sys:String x:Key="S.Settings.RealtimePauseHotkey">一時停止 / 再開</sys:String>
     <sys:String x:Key="S.Settings.RealtimePauseHotkeyHint">[[リアルタイム翻訳]]を一時停止／再開する</sys:String>
     <sys:String x:Key="S.Settings.RealtimePauseHotkeyNote">「一時停止 / 再開」はリアルタイム翻訳の実行中のみ使えます。(原文を確認したいときに便利です)</sys:String>
-    <sys:String x:Key="S.Settings.QuickLookupHotkey">クイック辞書</sys:String>
-    <sys:String x:Key="S.Settings.QuickLookupHotkeyHint">ショートカットキーで[[クイック辞書]]を開く</sys:String>
+    <sys:String x:Key="S.Settings.QuickLookupHotkey">ポップアップ翻訳</sys:String>
+    <sys:String x:Key="S.Settings.QuickLookupHotkeyHint">ショートカットキーで[[ポップアップ翻訳]]を開く</sys:String>
     <sys:String x:Key="S.Settings.QuickLookupHotkeyNote">テキストを選択していると、ウィンドウを開いたときに自動で読み込んで翻訳します。</sys:String>
-    <sys:String x:Key="S.Settings.QuickTranslateHotkey">クイック翻訳</sys:String>
+    <sys:String x:Key="S.Settings.QuickTranslateHotkey">置換翻訳</sys:String>
     <sys:String x:Key="S.Settings.QuickTranslateHotkeyHint">[[選択中のテキスト]]を翻訳して貼り付け、原文を置き換える</sys:String>
     <sys:String x:Key="S.Settings.QuickTranslateHotkeyNote" xml:space="preserve">文字を入力できる欄でのみ動作し、入力欄以外には貼り付けられません。</sys:String>
     <sys:String x:Key="S.Settings.QuickTranslateSettings">翻訳設定</sys:String>
-    <sys:String x:Key="S.Settings.QuickTranslateLanguageNote">この言語設定はクイック翻訳専用です。スクリーンショット翻訳、テキスト翻訳、リアルタイム翻訳には影響しません。</sys:String>
+    <sys:String x:Key="S.Settings.QuickTranslateLanguageNote">この言語設定は置換翻訳専用です。スクリーンショット翻訳、テキスト翻訳、リアルタイム翻訳には影響しません。</sys:String>
     <sys:String x:Key="S.Settings.HotkeyNeedsModifier">✗ 単独で使えるのは F1–F24、Pause、Scroll Lock のみです。ほかのキーは Ctrl／Alt／Shift と組み合わせてください</sys:String>
 
     <sys:String x:Key="S.Settings.General">一般</sys:String>
@@ -437,6 +452,9 @@
     <sys:String x:Key="S.Settings.ServiceDefault">既定値を使用</sys:String>
     <sys:String x:Key="S.Settings.ServiceDialogTitle">{0} の設定</sys:String>
     <sys:String x:Key="S.Settings.ApiBaseUrl">API アドレス</sys:String>
+    <sys:String x:Key="S.Settings.OpenAiTimeout">タイムアウト</sys:String>
+    <sys:String x:Key="S.Settings.OpenAiTimeoutUnit">秒</sys:String>
+    <sys:String x:Key="S.Settings.OpenAiTimeoutMin">{0} 秒以上を入力してください</sys:String>
     <sys:String x:Key="S.Settings.ModelName">モデル名</sys:String>
     <sys:String x:Key="S.Settings.CopyModelName">モデル名をコピー</sys:String>
     <sys:String x:Key="S.Settings.ModelRequired">必須</sys:String>
@@ -510,14 +528,40 @@
     <sys:String x:Key="S.Settings.SavePath">保存先</sys:String>
     <sys:String x:Key="S.Settings.SavePathTip">クリックしてフォルダーを選択</sys:String>
     <sys:String x:Key="S.Settings.OpenFolderTip">フォルダーを開く</sys:String>
+    <sys:String x:Key="S.Settings.MangaModels">漫画縦書きモデル</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsDesc1">日本語マンガの縦書き専用。より完全に、より速く。</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsDesc2">VRAM 1 GB 以上が必要、2 GB 推奨。</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsDesc2Unsupported">DirectX 12 非対応のため、通常の認識を使います。</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsFeatureVertical">日本語縦書き</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsFeatureMissed">漏れが少ない</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsFeatureFast">より高速</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsDownload">ダウンロード（{0} MB）</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsCancel">キャンセル</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsDelete">モデルを削除</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsRetry">再試行</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsDeleteFailed">モデルを削除できませんでした：{0}</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsNotDownloaded">未ダウンロード</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsDownloading">ダウンロード中</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsReady">準備完了</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsDisabled">オフ</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsNoGpu">使用不可</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsFailed">ダウンロード失敗</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsUnsupported">非対応</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsProgress">{0} / {1} MB · {2}%</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsEnabled">漫画モデルを使用中</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsSwitchedOff">オフ（標準モデル）</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsReasonLoadFailed">{0} でモデルを読み込めませんでした。縦書きは通常の認識を使います。</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsReasonReadFailed">{0} での認識中にエラーが発生しました。縦書きは通常の認識を使います。</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsErrorNetwork">ダウンロードサーバーに接続できません。接続を確認して再試行してください。</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsErrorServer">ダウンロードサーバーがエラーを返しました（{0}）。</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsErrorChecksum">ダウンロードしたファイルが不完全か破損しています。</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsErrorDisk">モデルを保存できませんでした。ディスクの空き容量を確認してください。</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsErrorOther">ダウンロードが完了しませんでした。もう一度お試しください。</sys:String>
 
     <sys:String x:Key="S.Settings.Appearance">外観</sys:String>
     <sys:String x:Key="S.Settings.Theme">テーマ</sys:String>
     <sys:String x:Key="S.Settings.ThemeLight">ライト</sys:String>
     <sys:String x:Key="S.Settings.ThemeDark">ダーク</sys:String>
-    <sys:String x:Key="S.Settings.CaptureFont">スクリーンショット翻訳のフォント</sys:String>
-    <sys:String x:Key="S.Settings.CaptureFontDefault">既定（Microsoft JhengHei）</sys:String>
-    <sys:String x:Key="S.Settings.CaptureFontHint">スクリーンショットに重ねる翻訳文に使用します。文字がない場合は既定のフォントに切り替わります。</sys:String>
     <sys:String x:Key="S.Settings.UiLanguage">表示言語</sys:String>
 
     <sys:String x:Key="S.Settings.Advanced">詳細設定</sys:String>
@@ -618,6 +662,14 @@
     <sys:String x:Key="S.Toolbar.AutoTranslate">自動翻訳</sys:String>
     <sys:String x:Key="S.Toolbar.SaveScreenshot">スクリーンショットを保存</sys:String>
     <sys:String x:Key="S.Toolbar.SavePathInSettings">保存先は設定で変更できます</sys:String>
+    <sys:String x:Key="S.Toolbar.ModelHintSwitch">モデルのヒントを表示</sys:String>
+    <sys:String x:Key="S.Toolbar.ModelHintSwitchTip">翻訳元の言語の下に、どのモデルで認識するかを表示します。</sys:String>
+    <sys:String x:Key="S.Toolbar.MangaHintChooseJapanese">現在は標準モデル。日本語を指定すると漫画縦書きモデルに切り替わります</sys:String>
+    <sys:String x:Key="S.Toolbar.MangaHintApplied">漫画縦書きモデルを使用します</sys:String>
+    <sys:String x:Key="S.Toolbar.MangaHintDownloading">漫画縦書きモデルをダウンロード中</sys:String>
+    <sys:String x:Key="S.Toolbar.MangaHintNotInstalled">漫画縦書きモデル未導入（設定から入手）</sys:String>
+    <sys:String x:Key="S.Realtime.MangaHintApplied">漫画縦書きモデルを使用します（横書きは標準モデル）</sys:String>
+    <sys:String x:Key="S.Realtime.MangaHintNotInstalled">漫画縦書きモデル未導入（設定から入手。横書きは標準モデルで、追加のダウンロードは不要）</sys:String>
     <sys:String x:Key="S.Debug.DisplayScope">表示範囲</sys:String>
     <sys:String x:Key="S.Debug.BoxDisplayScope">枠の表示範囲</sys:String>
     <sys:String x:Key="S.Debug.SourceOnly">原文のみ</sys:String>
@@ -625,4 +677,7 @@
     <!-- Two lines, one per half of the switch. xml:space is what keeps the break: without it XAML
          collapses the &#x0A; away and the two sentences run together. -->
     <sys:String x:Key="S.Debug.ScopeHint" xml:space="preserve">原文のみ：枠線は原文の画面にのみ表示します。&#x0A;原文と訳文：原文・訳文どちらの画面にも枠線を表示します</sys:String>
+    <sys:String x:Key="S.Settings.CaptureFont">スクリーンショット翻訳のフォント</sys:String>
+    <sys:String x:Key="S.Settings.CaptureFontDefault">既定（翻訳先の言語に合わせる）</sys:String>
+    <sys:String x:Key="S.Settings.CaptureFontHint">スクリーンショットに重ねる翻訳文に使用します。文字がない場合は既定のフォントに切り替わります。</sys:String>
 </ResourceDictionary>

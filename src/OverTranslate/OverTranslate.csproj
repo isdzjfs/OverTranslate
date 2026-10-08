@@ -29,12 +29,22 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>icons\app.ico</ApplicationIcon>
     <StartupObject>OverTranslate.App</StartupObject>
-    <Version>2.5.0</Version>
+    <Version>2.6.0</Version>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <!-- WFAC010 tells WinForms apps to declare DPI awareness through Application.SetHighDpiMode.
          This is a WPF app that only references WinForms types; ApplicationConfiguration.Initialize
          is never called, so the manifest is the only mechanism that takes effect. -->
     <NoWarn>$(NoWarn);WFAC010</NoWarn>
+    <!-- Microsoft.AI.DirectML (pulled in by the DirectML runtime) copies DirectML.dll, its PDB and its debug
+         layer by default. None of them ship: DirectML.dll is downloaded with the manga models, the only thing
+         that uses it (ocrmodels/manga-vertical.json, DirectMlDevice). onnxruntime.dll imports it delay-loaded,
+         so nothing else ever asks for it. -->
+    <Microsoft_AI_DirectML_SkipLibraryCopy>true</Microsoft_AI_DirectML_SkipLibraryCopy>
+    <Microsoft_AI_DirectML_SkipDebugLayerCopy>true</Microsoft_AI_DirectML_SkipDebugLayerCopy>
+    <!-- The self-contained runtime brings WPF/WinForms resource satellites for 13 cultures (built-in dialog text,
+         exception messages). Keep the ones matching the UI languages the app ships (Resources\Strings.*.xaml);
+         anyone else gets the neutral English built into the framework assemblies. About 4 MB compressed. -->
+    <SatelliteResourceLanguages>en;ja;ko;zh-Hans;zh-Hant</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>
@@ -50,20 +60,37 @@
     <None Update="NLog.config">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- onnxruntime.dll links the Visual C++ runtime dynamically (MSVCP140, MSVCP140_1, VCRUNTIME140, VCRUNTIME140_1)
+         and nothing else in the package brings it: the self-contained .NET runtime only carries its own renamed
+         vcruntime140_cor3.dll. Most machines have the VC++ Redistributable from some game or driver, a clean Windows
+         does not, and there every OCR call dies in the NativeMethods type initializer. App-local deployment from
+         VS's redist folder (VC\Redist\MSVC\<version>\x64\Microsoft.VC145.CRT, 14.51 here); it has to be at least the
+         toolset onnxruntime.dll was linked with (14.44 for 1.24.4). Placed next to onnxruntime.dll, which is the
+         first place the loader looks. -->
+    <None Include="vcruntime\*.dll">
+      <Link>%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <EmbeddedResource Include="icons\app.ico" />
     <EmbeddedResource Include="icons\app-compact.ico" />
     <Resource Include="Resources\Cursors\capture_crosshair.cur" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="GTranslate" Version="2.4.0" />
-    <PackageReference Include="NLog" Version="5.0.4" />
-    <!-- CPU morphology/inpainting only; omit full video/DNN runtime and unused WPF adapters. -->
-    <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260627" />
-    <PackageReference Include="OpenCvSharp4.runtime.win.slim" Version="4.13.0.20260627" />
-    <PackageReference Include="OpenccNetLib" Version="1.6.2" />
-    <PackageReference Include="RapidOcrNet" Version="3.0.0" ExcludeAssets="build" />
-    <PackageReference Include="Velopack" Version="1.2.0" />
+    <ProjectReference Include="..\OverTranslate.Translation\OverTranslate.Translation.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="NLog" Version="5.0.4" />
+    <PackageReference Include="OpenccNetLib" Version="1.6.2" />
+    <PackageReference Include="RapidOcrNet" Version="3.0.0" ExcludeAssets="build" />
+    <!-- One onnxruntime.dll for the whole process, the DirectML build (the vertical manga models run on the GPU).
+         RapidOcrNet 3.0.0 asks for Microsoft.ML.OnnxRuntime 1.27 (CPU native + managed); the DirectML package stops
+         at 1.24.4, so the CPU native package is referenced only to exclude its assets. The managed wrapper stays at
+         1.27 (RapidOcrNet binds to that assembly version); its OrtApi table was checked field by field against the
+         1.24.4 native header. Redo that check whenever RapidOcrNet moves the managed package past 1.27. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.27.0" ExcludeAssets="all" />
+    <PackageReference Include="Velopack" Version="1.2.0" />
+  </ItemGroup>
 </Project>

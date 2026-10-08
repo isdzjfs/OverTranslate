@@ -4,7 +4,13 @@
 
     <!-- Keys are grouped by the surface they appear on. Every key here must also exist in
          Strings.en.xaml — StringsParityTests fails the build otherwise. Strings holding {0}
-         are composite formats consumed through LocalizationService.Format. -->
+         are composite formats consumed through LocalizationService.Format.
+
+         Keys keep the names features had when they were added, and those names can lag behind
+         what the screen says: S.QuickTranslate.* and S.Settings.QuickTranslate* belong to 替換翻譯
+         (In-place translation), renamed from 快速翻譯 in #277 — see QuickTranslateSettings — and
+         S.QuickLookup.* to 取詞翻譯 (Quick lookup), whose Japanese and Korean names were changed in
+         the same issue. -->
 
     <!-- ── Shared ── -->
     <sys:String x:Key="S.Common.Reset">重設</sys:String>
@@ -83,6 +89,7 @@
     <sys:String x:Key="S.Error.OpenAiHttp">OpenAI Compatible API 回傳 {0}：{1}</sys:String>
     <sys:String x:Key="S.Error.OpenAiUnparsable">OpenAI Compatible API 回應格式無法解析。</sys:String>
     <sys:String x:Key="S.Error.OpenAiNoTranslation">OpenAI Compatible API 未回傳譯文。</sys:String>
+    <sys:String x:Key="S.Error.OpenAiTimeout">OpenAI Compatible API 在 {0} 秒內沒有回應。可在「翻譯服務設定」調整逾時秒數。</sys:String>
     <sys:String x:Key="S.Error.OpenAiBadUrl">OpenAI Compatible API 位址必須是有效的 HTTP 或 HTTPS 網址。</sys:String>
     <sys:String x:Key="S.Error.OpenAiNoModel">尚未指定模型名稱。請在「翻譯服務設定」中填入要使用的模型。</sys:String>
     <sys:String x:Key="S.Error.UnknownError">未知錯誤</sys:String>
@@ -91,6 +98,7 @@
     <sys:String x:Key="S.Error.OcrSwapTimeout">等待其他辨識結束以切換 OCR 模型時逾時。</sys:String>
     <sys:String x:Key="S.Error.OcrImageConvert">無法將影像轉換為 ONNX OCR 可讀格式。</sys:String>
     <sys:String x:Key="S.Error.OcrModelMissing">找不到 OCR 模型檔案：{0}</sys:String>
+    <sys:String x:Key="S.Error.NotTranslated">未翻譯</sys:String>
 
     <!-- ── Text translation page ── -->
     <sys:String x:Key="S.Translation.Title">文字翻譯</sys:String>
@@ -113,7 +121,7 @@
     <sys:String x:Key="S.Translation.Translating">翻譯中…</sys:String>
     <sys:String x:Key="S.Translation.SpeakFailed">朗讀失敗：{0}</sys:String>
 
-    <!-- ── 快速翻譯 ── 只在提示卡片上出現的字，一行以內，因為它蓋在使用者自己的視窗上。 -->
+    <!-- ── 替換翻譯 ── 只在提示卡片上出現的字，一行以內，因為它蓋在使用者自己的視窗上。 -->
     <sys:String x:Key="S.QuickTranslate.Replaced">已完成翻譯並貼上譯文。</sys:String>
     <sys:String x:Key="S.QuickTranslate.EmptyResult">翻譯結果是空的，已保留原本的文字。</sys:String>
     <sys:String x:Key="S.QuickTranslate.FocusMoved">已切換視窗，無法貼上翻譯結果。</sys:String>
@@ -184,6 +192,9 @@
     <sys:String x:Key="S.Toolbar.AnnotateHint">在選取範圍上塗畫標記</sys:String>
     <sys:String x:Key="S.Annotate.Pen">筆</sys:String>
     <sys:String x:Key="S.Annotate.Highlighter">螢光筆</sys:String>
+    <sys:String x:Key="S.Annotate.Line">直線</sys:String>
+    <sys:String x:Key="S.Annotate.Rectangle">方框</sys:String>
+    <sys:String x:Key="S.Annotate.Ellipse">圓框</sys:String>
     <sys:String x:Key="S.Annotate.Eraser">橡皮擦</sys:String>
     <sys:String x:Key="S.Annotate.Undo">復原</sys:String>
     <sys:String x:Key="S.Annotate.Redo">重做</sys:String>
@@ -337,6 +348,15 @@
     <sys:String x:Key="S.Realtime.EditBlocks">編輯翻譯區塊</sys:String>
     <sys:String x:Key="S.Realtime.CrosshairOff">暫停框選，改為操作下方畫面</sys:String>
     <sys:String x:Key="S.Realtime.CrosshairOn">恢復框選</sys:String>
+    <sys:String x:Key="S.Realtime.CompareDisplay">原文對照</sys:String>
+    <sys:String x:Key="S.Realtime.CompareDisplayOn">已開啟</sys:String>
+    <sys:String x:Key="S.Realtime.CompareDisplayOff">已關閉</sys:String>
+    <sys:String x:Key="S.Realtime.CompareDisplayOnHint">原文對照：關閉時將翻譯後譯文直接覆蓋原文畫面</sys:String>
+    <sys:String x:Key="S.Realtime.CompareDisplayOffHint">原文對照：開啟時將保留原文畫面，翻譯後譯文顯示於對照區域</sys:String>
+    <sys:String x:Key="S.Realtime.CompareCopyHint">拖曳可移動對照框，按兩下標籤回到自動位置</sys:String>
+    <sys:String x:Key="S.Realtime.CompareHideBlock">關閉此區塊的原文對照</sys:String>
+    <sys:String x:Key="S.Realtime.CompareShowBlock">顯示此區塊的原文對照</sys:String>
+    <sys:String x:Key="S.Realtime.CompareCopyCenter">譯文顯示位置</sys:String>
     <sys:String x:Key="S.Realtime.CrosshairOffHint">已暫停框選，可直接操作下方畫面</sys:String>
 
     <!-- Control bar and edit window messages -->
@@ -391,7 +411,7 @@
     <!-- Session failures -->
     <sys:String x:Key="S.Realtime.SessionAborted">即時翻譯已中止：{0}</sys:String>
     <sys:String x:Key="S.Realtime.MissingApiKey">缺少 API Key，請先在設定中輸入。</sys:String>
-    <sys:String x:Key="S.Realtime.RetryingAfterFailure">翻譯暫時失敗，將持續重試：{0}</sys:String>
+    <sys:String x:Key="S.Realtime.TranslationFailed">翻譯失敗：{0}</sys:String>
 
     <!-- ── Translation providers ──
          Names as well as hints: "Google 翻譯" is the product's Chinese name, not a label we
@@ -400,6 +420,7 @@
     <sys:String x:Key="S.Provider.GoogleHint">與 ReVanced 相同的 translateHtml 介面</sys:String>
     <sys:String x:Key="S.Provider.Google2">Google 翻譯 (RPC)</sys:String>
     <sys:String x:Key="S.Provider.Google2Hint">新版 RPC 介面</sys:String>
+    <sys:String x:Key="S.Provider.GoogleWeb">Google 翻譯 (標準)</sys:String>
     <sys:String x:Key="S.Provider.Bing">Bing 翻譯</sys:String>
     <sys:String x:Key="S.Provider.Microsoft">Microsoft 翻譯</sys:String>
     <sys:String x:Key="S.Provider.DeepL">DeepL 翻譯</sys:String>
@@ -425,11 +446,11 @@
     <sys:String x:Key="S.Settings.QuickLookupHotkey">取詞翻譯</sys:String>
     <sys:String x:Key="S.Settings.QuickLookupHotkeyHint">按下快捷鍵開啟[[取詞翻譯]]</sys:String>
     <sys:String x:Key="S.Settings.QuickLookupHotkeyNote">若有選取文字，開啟視窗時會自動帶入並翻譯。</sys:String>
-    <sys:String x:Key="S.Settings.QuickTranslateHotkey">快速翻譯</sys:String>
+    <sys:String x:Key="S.Settings.QuickTranslateHotkey">替換翻譯</sys:String>
     <sys:String x:Key="S.Settings.QuickTranslateHotkeyHint">將[[選取文字]]翻譯後貼上並取代原文</sys:String>
     <sys:String x:Key="S.Settings.QuickTranslateHotkeyNote" xml:space="preserve">僅適用於可輸入文字的欄位，非輸入區域則無法貼上。</sys:String>
     <sys:String x:Key="S.Settings.QuickTranslateSettings">翻譯設定</sys:String>
-    <sys:String x:Key="S.Settings.QuickTranslateLanguageNote">此設定僅適用於快速翻譯，不會影響截圖翻譯、文字翻譯或即時翻譯。</sys:String>
+    <sys:String x:Key="S.Settings.QuickTranslateLanguageNote">此設定僅適用於替換翻譯，不會影響截圖翻譯、文字翻譯或即時翻譯。</sys:String>
     <sys:String x:Key="S.Settings.HotkeyNeedsModifier">✗ 單一按鍵只能是 F1–F24、Pause 或 Scroll Lock，其他按鍵請搭配 Ctrl／Alt／Shift</sys:String>
 
     <sys:String x:Key="S.Settings.General">一般設定</sys:String>
@@ -451,6 +472,9 @@
     <sys:String x:Key="S.Settings.ServiceDefault">使用預設</sys:String>
     <sys:String x:Key="S.Settings.ServiceDialogTitle">{0}設定</sys:String>
     <sys:String x:Key="S.Settings.ApiBaseUrl">API 位址</sys:String>
+    <sys:String x:Key="S.Settings.OpenAiTimeout">逾時</sys:String>
+    <sys:String x:Key="S.Settings.OpenAiTimeoutUnit">秒</sys:String>
+    <sys:String x:Key="S.Settings.OpenAiTimeoutMin">最少 {0} 秒</sys:String>
     <sys:String x:Key="S.Settings.ModelName">模型名稱</sys:String>
     <sys:String x:Key="S.Settings.CopyModelName">複製模型名稱</sys:String>
     <sys:String x:Key="S.Settings.ModelRequired">必填</sys:String>
@@ -526,14 +550,40 @@
     <sys:String x:Key="S.Settings.SavePath">儲存位置</sys:String>
     <sys:String x:Key="S.Settings.SavePathTip">點擊以選擇儲存資料夾</sys:String>
     <sys:String x:Key="S.Settings.OpenFolderTip">開啟資料夾</sys:String>
+    <sys:String x:Key="S.Settings.MangaModels">漫畫直排模型</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsDesc1">日文漫畫直排專用，辨識更完整、速度更快。</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsDesc2">需 1 GB 以上 VRAM，建議 2 GB。</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsDesc2Unsupported">顯示卡不支援 DirectX 12，將改用一般辨識。</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsFeatureVertical">日文直排</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsFeatureMissed">漏句更少</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsFeatureFast">速度更快</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsDownload">下載（{0} MB）</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsCancel">取消</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsDelete">刪除模型</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsRetry">重試</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsDeleteFailed">無法刪除模型：{0}</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsNotDownloaded">尚未下載</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsDownloading">下載中</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsReady">已就緒</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsDisabled">已停用</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsNoGpu">無法使用</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsFailed">下載失敗</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsUnsupported">不支援</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsProgress">{0} / {1} MB · {2}%</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsEnabled">已啟用漫畫直排模型</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsSwitchedOff">已停用（使用預設模型）</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsReasonLoadFailed">模型無法在 {0} 上載入，直排改用一般辨識。</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsReasonReadFailed">在 {0} 上辨識時發生錯誤，直排改用一般辨識。</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsErrorNetwork">無法連線到下載伺服器，請確認網路後重試。</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsErrorServer">下載伺服器回應錯誤（{0}）。</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsErrorChecksum">下載的檔案不完整或已損毀。</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsErrorDisk">無法儲存模型，請確認磁碟空間是否足夠。</sys:String>
+    <sys:String x:Key="S.Settings.MangaModelsErrorOther">下載沒有完成，請再試一次。</sys:String>
 
     <sys:String x:Key="S.Settings.Appearance">外觀</sys:String>
     <sys:String x:Key="S.Settings.Theme">主題</sys:String>
     <sys:String x:Key="S.Settings.ThemeLight">淺色</sys:String>
     <sys:String x:Key="S.Settings.ThemeDark">深色</sys:String>
-    <sys:String x:Key="S.Settings.CaptureFont">截圖翻譯字體</sys:String>
-    <sys:String x:Key="S.Settings.CaptureFontDefault">預設（Microsoft JhengHei）</sys:String>
-    <sys:String x:Key="S.Settings.CaptureFontHint">用於覆蓋在截圖上的譯文；缺少字形時會自動使用預設字體。</sys:String>
     <sys:String x:Key="S.Settings.UiLanguage">介面語言</sys:String>
 
     <sys:String x:Key="S.Settings.Advanced">進階設定</sys:String>
@@ -632,6 +682,14 @@
     <sys:String x:Key="S.Toolbar.AutoTranslate">自動翻譯</sys:String>
     <sys:String x:Key="S.Toolbar.SaveScreenshot">儲存截圖</sys:String>
     <sys:String x:Key="S.Toolbar.SavePathInSettings">儲存位置可在設定中變更</sys:String>
+    <sys:String x:Key="S.Toolbar.ModelHintSwitch">顯示模型提示</sys:String>
+    <sys:String x:Key="S.Toolbar.ModelHintSwitchTip">在來源語言下方提示目前會使用哪個模型。</sys:String>
+    <sys:String x:Key="S.Toolbar.MangaHintChooseJapanese">目前為預設模型，指定日文後將自動切換為漫畫直排模型</sys:String>
+    <sys:String x:Key="S.Toolbar.MangaHintApplied">已套用漫畫直排模型</sys:String>
+    <sys:String x:Key="S.Toolbar.MangaHintDownloading">漫畫直排模型下載中</sys:String>
+    <sys:String x:Key="S.Toolbar.MangaHintNotInstalled">尚未安裝漫畫直排模型，可至設定下載</sys:String>
+    <sys:String x:Key="S.Realtime.MangaHintApplied">已套用漫畫直排模型（橫排為預設模型）</sys:String>
+    <sys:String x:Key="S.Realtime.MangaHintNotInstalled">尚未安裝漫畫直排模型，可至設定下載（橫排為預設模型，不需要額外下載）</sys:String>
     <sys:String x:Key="S.Debug.DisplayScope">顯示範圍</sys:String>
     <sys:String x:Key="S.Debug.BoxDisplayScope">框線顯示範圍</sys:String>
     <sys:String x:Key="S.Debug.SourceOnly">僅原文</sys:String>
@@ -639,4 +697,7 @@
     <!-- Two lines, one per half of the switch. xml:space is what keeps the break: without it XAML
          collapses the &#x0A; away and the two sentences run together. -->
     <sys:String x:Key="S.Debug.ScopeHint" xml:space="preserve">僅原文：框線只顯示於原文畫面&#x0A;原文與譯文：原文、譯文畫面皆顯示框線</sys:String>
+    <sys:String x:Key="S.Settings.CaptureFont">截圖翻譯字體</sys:String>
+    <sys:String x:Key="S.Settings.CaptureFontDefault">預設（依目標語言選擇）</sys:String>
+    <sys:String x:Key="S.Settings.CaptureFontHint">用於覆蓋在截圖上的譯文；缺少字形時會自動使用預設字體。</sys:String>
 </ResourceDictionary>

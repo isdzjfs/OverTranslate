@@ -14,8 +14,7 @@ public class SettingsService
     // Velopack installs each version into ...\OverTranslate\current\ and replaces that entire folder
     // on update. Settings used to live in BaseDirectory, i.e. inside current\, so every update wiped
     // them and the app came back up on factory defaults. Roaming AppData sits outside the install.
-    private static readonly string SettingsDirectory = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OverTranslate");
+    private static readonly string SettingsDirectory = AppDataPaths.Root;
 
     private static readonly string SettingsPath = Path.Combine(SettingsDirectory, "appsettings.json");
 
@@ -115,8 +114,13 @@ public class SettingsService
 
         Apply(settings, root, "");
 
-        // The grouped section wins. Older files used flat quick-translation keys, and before
-        // that shared the text-translation pair. Migrate only when the group is absent.
+        // Retired options, read as the ones that replaced them — the pickers no longer list them.
+        settings.Provider = LanguageData.CurrentProvider(settings.Provider);
+        settings.Realtime.Provider = LanguageData.CurrentProvider(settings.Realtime.Provider);
+
+        // 替換翻譯's languages (QuickTranslate, its name before #277). The grouped section wins.
+        // Older files used flat QuickTranslate* keys, and before that shared the text-translation
+        // pair. Migrate only when the group is absent.
         if (!root.ContainsKey(nameof(AppSettings.QuickTranslate)))
         {
             string LegacyLanguage(string key, string shared) =>
@@ -233,6 +237,25 @@ public class SettingsService
         current.SaveScreenshotToDisk = save;
         Save();
         CaptureOptionsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Raised when 使用漫畫直排模型 or 顯示模型提示 changes. The first is set on the settings
+    /// page's card and put back on by a delete or a download; the second from the capture toolbar's
+    /// menu. The engine and every hint on screen follow both.
+    /// </summary>
+    public event EventHandler? MangaModelOptionsChanged;
+
+    public void UpdateMangaModelOptions(bool? useModels = null, bool? showHint = null)
+    {
+        var current = Current;
+        var use = useModels ?? current.UseMangaModels;
+        var show = showHint ?? current.Capture.ShowModelHint;
+        if (use == current.UseMangaModels && show == current.Capture.ShowModelHint) return;
+        current.UseMangaModels = use;
+        current.Capture.ShowModelHint = show;
+        Save();
+        MangaModelOptionsChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public void Save()

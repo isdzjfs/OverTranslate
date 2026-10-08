@@ -1,6 +1,9 @@
 using System.Drawing;
 using System.IO;
-using GTranslate.Translators;
+using OverTranslate.Translation;
+using OverTranslate.Translation.Bing;
+using OverTranslate.Translation.Google;
+using OverTranslate.Translation.Microsoft;
 using OverTranslate.Services;
 using OverTranslate.Services.Ocr;
 using OverTranslate.Services.Providers;
@@ -108,7 +111,7 @@ if (args.Length == 0)
     Console.Error.WriteLine("                  (realtime-sized rows: the pieces, the gaps, and what the whole row reads as)");
     Console.Error.WriteLine("       OcrHarness --box-repair-rows <lang> <image.png> [more.png ...]");
     Console.Error.WriteLine("                  (what ChromaticBoxRepair measures on each row, and what it repaired)");
-    Console.Error.WriteLine("       OcrHarness --xlate-test   (Google RPC translation check, no OCR)");
+    Console.Error.WriteLine("       OcrHarness --xlate-test   (network translation benchmark, no OCR)");
     Console.Error.WriteLine("       (add --panel / --lang KO / --size N / --det model.onnx:half to any sweep)");
     return 1;
 }
@@ -269,6 +272,8 @@ if (detectorFlag >= 0)
     Console.WriteLine($"detector: {detPath}  normalization={normalization}");
 }
 
+var http = EngineHttp.CreateClient(TimeSpan.FromSeconds(10));
+
 // Translate one line given on the command line. For telling an OCR problem from a translation
 // one: when a word goes missing on screen, this says whether the recogniser dropped it or the
 // translator did.
@@ -281,23 +286,22 @@ if (args[0] == "--xlate-line")
         return 1;
     }
 
-    // Compare the selectable free endpoints independently; a limit measured on one says nothing about another.
+    // All five, named apart. "Google" is three different endpoints and they need not behave
+    // alike, so a limit measured on one says nothing about the others.
     //
-    // --raw bypasses TranslationRequestChunks for the GTranslate engines. Google2 always keeps
-    // its own batch budget, matching the production path.
-    var raw = args.Contains("--raw");
-    var line2 = raw ? string.Join(' ', args.Skip(1).Where(a => a != "--raw")) : line;
-    var limit = raw ? int.MaxValue : (int?)null;
+    // There used to be a --raw that bypassed TranslationRequestChunks. Cutting is now each engine's
+    // own business (OverTranslate.Translation.BatchTranslator), so reproducing an endpoint past its
+    // limit means a scratch request of its own rather than a switch here.
+    var block = new List<OcrTextBlock> { new(line, new System.Windows.Rect(0, 0, 100, 20)) };
+    Console.WriteLine($"  input: {line.Length} chars");
 
-    var block = new List<OcrTextBlock> { new(line2, new System.Windows.Rect(0, 0, 100, 20)) };
-    Console.WriteLine($"  input: {line2.Length} chars, chunking {(raw ? "OFF" : "ON")}");
-
-    foreach (var (name, provider) in new (string, ITranslationProvider)[]
+    foreach (var (name, provider) in new (string, EngineProvider)[]
              {
-                 ("Microsoft", new GTranslateProvider(new MicrosoftTranslator(), null, limit)),
-                 ("Google2   ", new GoogleTranslateHtmlProvider(new System.Net.Http.HttpClient())),
-                 ("Google RPC", new GTranslateProvider(new GoogleTranslator2(), null, limit)),
-                 ("Bing      ", new GTranslateProvider(new BingTranslator(), null, limit)),
+                 ("Microsoft    ", new EngineProvider(new MicrosoftTranslator(http))),
+                 ("Google Web   ", new EngineProvider(new GoogleWebTranslator(http))),
+                 ("Google RPC   ", new EngineProvider(new GoogleRpcTranslator(http))),
+                 ("Google Chrome", new EngineProvider(new GoogleChromeTranslator(http))),
+                 ("Bing         ", new EngineProvider(new BingTranslator(http))),
              })
     {
         try
@@ -314,20 +318,7 @@ if (args[0] == "--xlate-line")
     return 0;
 }
 
-if (args[0] == "--google2-check")
-{
-    var text = args.Length > 1 ? string.Join(' ', args.Skip(1)) : "Settings have been saved successfully.";
-    using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-    var provider = new GoogleTranslateHtmlProvider(http);
-    var block = new OcrTextBlock(text, new System.Windows.Rect());
-    var started = System.Diagnostics.Stopwatch.StartNew();
-    var (translated, detected) = await provider.TranslateAsync([block], "auto", "ZH-HANS", "");
-    Console.WriteLine($"Google2 translateHtml: {started.ElapsedMilliseconds} ms, detected={detected}");
-    Console.WriteLine(translated[0].TranslatedText);
-    return 0;
-}
-
-// Translation-only Google RPC check with per-run latency. No OCR / screenshot needed.
+// Explicit translation-only benchmark of Google2. A failed run is returned directly.
 if (args[0] == "--xlate-test")
 {
     var samples = new List<OcrTextBlock>
@@ -338,15 +329,14 @@ if (args[0] == "--xlate-test")
         new("Translation speed should now be more consistent.", new System.Windows.Rect(0, 0, 100, 20)),
     };
 
-    var googleRpcProvider = new GTranslateProvider(new GoogleTranslator2());
+    var provider = new EngineProvider(new GoogleChromeTranslator(http));
 
     for (var run = 1; run <= 3; run++)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var (translated, detected) = await googleRpcProvider.TranslateAsync(samples, "EN", "ZH-HANT", "");
+        var (translated, detected) = await provider.TranslateAsync(samples, "EN", "ZH-HANT", "");
         sw.Stop();
         Console.WriteLine($"--- run {run}: {sw.ElapsedMilliseconds} ms (detected={detected}) ---");
-        Console.WriteLine("  引擎: Google RPC");
         foreach (var t in translated)
             Console.WriteLine($"  EN: {t.OriginalText}\n  ZH: {t.TranslatedText}");
         Console.WriteLine();
@@ -2758,7 +2748,7 @@ if (args[0] == "--scale-sweep")
 }
 
 using var ocr = new OcrService();
-var translator = new GTranslateProvider(new MicrosoftTranslator());
+var translator = new EngineProvider(new MicrosoftTranslator(http));
 
 foreach (var path in args)
 {

@@ -13,6 +13,7 @@ using Brushes = System.Windows.Media.Brushes;
 using Color = System.Windows.Media.Color;
 using FlowDirection = System.Windows.FlowDirection;
 using FontFamily = System.Windows.Media.FontFamily;
+using Point = System.Windows.Point;
 using Size = System.Windows.Size;
 
 namespace OverTranslate.Views.Realtime;
@@ -82,10 +83,28 @@ public partial class RealtimeBlockWindow : Window
     // while one subtitle is on screen — pulsed the text the reader was in the middle of. Swapping
     // outright is the quieter of the two, and the repaints it makes visible are better dealt with
     // by not making them: see RealtimeBlockWindow.SetLines and TextSimilarity.
-    private static readonly FontFamily TextFont =
-        new("Microsoft JhengHei, Segoe UI Variable Text, Segoe UI, Sans-Serif");
+    // Set by the target language rather than fixed: see TranslatedTextFont. A region's target does
+    // not change for as long as its window lives, so it is decided once, and every measurement and
+    // every TextBlock below reads this same family.
+    private readonly FontFamily _textFont;
+    // Kept for vertical writing, which draws some punctuation differently by target language.
+    private readonly string _targetLanguage;
 
-    private readonly System.Drawing.Rectangle _physBounds;
+    // The block the user drew, which is what the picture under this window is read from — every
+    // grab, and every patch rectangle cut out of one, is in this rectangle's coordinates.
+    private readonly System.Drawing.Rectangle _sourceBounds;
+
+    // Where this window is pinned on screen. The same rectangle as the source unless 對照顯示 is on,
+    // in which case it is the block's copy beside it — laid out at the block's size, so every line's
+    // position inside the block is also its position inside this window, and nothing that lays a
+    // line out needs to know which of the two it is drawing in. Kept apart from the source all the
+    // same, because the two used to be one field and the capture path would otherwise read the
+    // picture under the copy: see CaptureUnderlyingRegion.
+    private readonly System.Drawing.Rectangle _displayBounds;
+
+    // How much smaller the copy is than its block — 1.0 over the block itself. The layout ignores it
+    // and the whole drawing is scaled once at the root instead: see the constructor.
+    private readonly double _displayScale;
     private readonly bool _latinSourceToCjkTarget;
 
     // The session's capture backend, reached through the controller so this window never holds one.
@@ -143,6 +162,16 @@ public partial class RealtimeBlockWindow : Window
     /// 進階選項 cannot be drawn without it, and a window that quietly fell back to reading the
     /// screen itself would be reading its own subtitles.
     /// </param>
+    /// <param name="displayLocation">
+    /// Where to draw, when that is not over the block itself — 對照顯示's copy beside it, as the
+    /// top-left corner of a rectangle the size of <paramref name="physBounds"/>, which is the whole of
+    /// what 對照顯示 changes. Null draws over the block, as this window always has.
+    /// </param>
+    /// <param name="displayScale">
+    /// How large the copy at <paramref name="displayLocation"/> is, as a fraction of the block — see
+    /// <see cref="RealtimeBlockPlacement.CompareScale"/>. Ignored without a location: over the block
+    /// itself the translation is always the block's size.
+    /// </param>
     public RealtimeBlockWindow(
         int regionId,
         System.Drawing.Rectangle physBounds,
@@ -157,7 +186,9 @@ public partial class RealtimeBlockWindow : Window
         RealtimeBlockMode mode = RealtimeBlockMode.Subtitle,
         bool border = false,
         string? borderColor = null,
-        RealtimeTextOrientation orientation = RealtimeTextOrientation.Horizontal)
+        RealtimeTextOrientation orientation = RealtimeTextOrientation.Horizontal,
+        System.Drawing.Point? displayLocation = null,
+        double displayScale = 1.0)
     {
         InitializeComponent();
         _mode = mode;
@@ -168,11 +199,28 @@ public partial class RealtimeBlockWindow : Window
             : null;
 
         RegionId = regionId;
-        _physBounds = physBounds;
+        _sourceBounds = physBounds;
+        _displayScale = displayLocation is null ? 1.0 : displayScale;
+        _displayBounds = displayLocation is { } location
+            ? new System.Drawing.Rectangle(location, RealtimeComparePlacement.Scaled(physBounds.Size, _displayScale))
+            : physBounds;
+
+        // A shrunk copy is the full-size drawing scaled down whole, not a layout of its own: the
+        // lines are set exactly as they would be over the block — sizes, wrapping, bands, borders —
+        // and only then made smaller together. Every layout this window has, across both directions
+        // and both kinds of block, then behaves at 0.7 the way it does at 1.0, which laying out
+        // against a smaller box would not promise: the fonts are picked from the source's line
+        // heights, and the minimum sizes and paddings are fixed numbers that would not shrink with
+        // it. A render transform rather than a layout one, because nothing here is laid out by the
+        // panels: the canvases place every element themselves and have no size to scale.
+        if (_displayScale != 1.0)
+            Root.RenderTransform = new ScaleTransform(_displayScale, _displayScale);
         _grabUnderlying = grabUnderlying;
         _naturalBackground = naturalBackground;
         _sampleTextColor = sampleTextColor;
         _latinSourceToCjkTarget = IsLatinToCjk(sourceLanguage, targetLanguage);
+        _textFont = TranslatedTextFont.For(targetLanguage);
+        _targetLanguage = targetLanguage;
         _textBrush = Freeze(new SolidColorBrush(RealtimeSubtitleColors.Text(textColor)));
         _scrimBrush = Freeze(new SolidColorBrush(
             RealtimeSubtitleColors.Scrim(scrimColor, scrimOpacity)));
@@ -203,7 +251,7 @@ public partial class RealtimeBlockWindow : Window
         WindowStyles.ApplyClickThrough(this, noActivate: true);
 
         // Before the DPI is read in Loaded: pinning settles which monitor the window belongs to.
-        ScreenGeometry.PinPhysicalBounds(this, _physBounds);
+        ScreenGeometry.PinPhysicalBounds(this, _displayBounds);
 
         // Nothing here asks to be hidden from screen capture. This window used to carry
         // WDA_EXCLUDEFROMCAPTURE so the loop would not read its own translation back; keeping the
@@ -261,8 +309,9 @@ public partial class RealtimeBlockWindow : Window
         Interlocked.Increment(ref _patchGeneration);
         var patches = new List<NaturalPatchVisual>();
 
-        double canvasWidth = _physBounds.Width / _dpiX;
-        double canvasHeight = _physBounds.Height / _dpiY;
+        // The block's size, not the window's: a shrunk copy is scaled at the root afterwards.
+        double canvasWidth = _sourceBounds.Width / _dpiX;
+        double canvasHeight = _sourceBounds.Height / _dpiY;
 
         // Grabbed only if something is going to read it. With 進階選項 off this window draws from the
         // two colours alone, exactly as it did before those switches existed.
@@ -280,7 +329,7 @@ public partial class RealtimeBlockWindow : Window
             // nothing to follow, and recording one here would have the refresh below replace it with
             // a patch the user never asked for.
             if (_naturalBackground)
-                patches.Add(new NaturalPatchVisual(background, visual.PatchBounds));
+                patches.Add(new NaturalPatchVisual(background, visual.PatchBounds, visual.Replate));
         }
 
         Volatile.Write(ref _naturalPatches, [.. patches]);
@@ -294,10 +343,16 @@ public partial class RealtimeBlockWindow : Window
     /// the first carries no background: its group's first row draws one patch for all of them.
     /// </summary>
     private readonly record struct LineVisual(
-        Border? Background, Border Text, System.Drawing.Rectangle PatchBounds);
+        Border? Background, Border Text, System.Drawing.Rectangle PatchBounds,
+        Func<CaptureBubbleBackdrop, System.Windows.Media.Brush?>? Replate = null);
 
+    /// <param name="Replate">
+    /// How a vertical line's plate is painted again from a new repair; null for a patch that is a
+    /// plain crop of it, which is every horizontal one.
+    /// </param>
     private readonly record struct NaturalPatchVisual(
-        Border Surface, System.Drawing.Rectangle PatchBounds);
+        Border Surface, System.Drawing.Rectangle PatchBounds,
+        Func<CaptureBubbleBackdrop, System.Windows.Media.Brush?>? Replate);
 
     /// <summary>Outlines a background patch when 顯示外觀 → 邊框 is on.</summary>
     /// <remarks>
@@ -307,14 +362,19 @@ public partial class RealtimeBlockWindow : Window
     private void ApplyBorder(Border background, TranslatedBlock line)
     {
         if (!_border) return;
-        background.BorderBrush = _fixedBorderBrush ??
-            Freeze(new SolidColorBrush(RealtimeSubtitleColors.RandomBorder(line.OriginalText)));
+        background.BorderBrush = BorderBrushFor(line);
         background.BorderThickness = new Thickness(RealtimeSubtitleColors.BorderThickness);
     }
+
+    private SolidColorBrush BorderBrushFor(TranslatedBlock line) =>
+        _fixedBorderBrush ?? Freeze(new SolidColorBrush(RealtimeSubtitleColors.RandomBorder(line.OriginalText)));
 
     private LineVisual? BuildLine(
         TranslatedBlock line, double canvasWidth, double canvasHeight, System.Drawing.Bitmap? frame, System.Drawing.Bitmap? repairedFrame)
     {
+        if (line.Tilt is { } tilt)
+            return BuildTiltedLine(line, tilt, canvasWidth, canvasHeight, frame, repairedFrame);
+
         double left = line.Bounds.X / _dpiX;
         double sourceWidth = line.Bounds.Width / _dpiX;
         double sourceHeight = line.Bounds.Height / _dpiY;
@@ -326,7 +386,8 @@ public partial class RealtimeBlockWindow : Window
         bool isGrouped = line.SourceLineBounds is { Count: > 1 };
 
         double glyphHeight = GetGlyphHeight(line, sourceHeight);
-        double fontSize = SourceFontScale.Calculate(glyphHeight, _latinSourceToCjkTarget);
+        double fontGlyphHeight = GetFontGlyphHeight(line, sourceHeight);
+        double fontSize = SourceFontScale.Calculate(fontGlyphHeight, _latinSourceToCjkTarget);
 
         // How tall the line being replaced actually is, which is not the same as how tall its
         // detection box is. A Latin source arrives with the full box — deliberately, because the
@@ -340,6 +401,11 @@ public partial class RealtimeBlockWindow : Window
         // supposed to stay picture the user is watching.
         double lineHeight = Math.Min(sourceHeight, glyphHeight * LineHeightRatio);
 
+        // The same line measured by its letters, which is what caps the font below. On a level line
+        // this is lineHeight again. On a tilted one lineHeight is the band that covers the slant,
+        // and capping the font against it capped nothing: the band is mostly tilt.
+        double fontLineHeight = Math.Min(sourceHeight, fontGlyphHeight * LineHeightRatio);
+
         // The whole block, not just the room to the right of the source's left edge: a band centred
         // on its source grows in both directions, so what bounds it is the block, and RealtimeBandPlacement
         // is what keeps it inside. Leaving the scrim's own padding out means the band fits exactly.
@@ -349,7 +415,7 @@ public partial class RealtimeBlockWindow : Window
         // untidy — the part past the edge is not rendered at all. Only the wrapped fallback below
         // needs it; a single line is bounded by its source's own height long before it gets close.
         double maxTextHeight = Math.Max(lineHeight, canvasHeight - ScrimPaddingY * 2);
-        var typeface = new Typeface(TextFont, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
+        var typeface = new Typeface(_textFont, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
 
         double textWidth;
         double textHeight;
@@ -371,7 +437,7 @@ public partial class RealtimeBlockWindow : Window
             // translation is welcome; here the scrim it forces is a band across live content the
             // user is trying to watch, so a translation half again as tall as the line underneath
             // buys legibility with the picture.
-            fontSize = Math.Max(MinFontSize, Math.Min(fontSize, lineHeight * MaxHeightOverSource / LineHeightRatio));
+            fontSize = Math.Max(MinFontSize, Math.Min(fontSize, fontLineHeight * MaxHeightOverSource / LineHeightRatio));
 
             // Kept because the wrapped fallback searches from here, not from whatever the width
             // shrink below left behind: wrapping buys width back, so a size that was too wide for
@@ -482,14 +548,7 @@ public partial class RealtimeBlockWindow : Window
         };
         ApplyBorder(background, line);
 
-        // Sampling is its own switch: with it off the reader's chosen colour is what gets drawn, and
-        // with it on that colour is still what an unconvincing sample falls back to.
-        var foreground = _textBrush;
-        if (_sampleTextColor && frame is not null)
-        {
-            var sampled = RealtimeNaturalBackground.SampleTextColor(frame, line.Bounds, _textBrush.Color);
-            foreground = Freeze(new SolidColorBrush(sampled));
-        }
+        var (foreground, edge) = SampleForeground(frame, line);
 
         // Same geometry, no background: the two are stacked in separate layers, so the text has to
         // carry its own box to land in exactly the place the repaired background covers.
@@ -499,10 +558,10 @@ public partial class RealtimeBlockWindow : Window
             Height = scrimHeight,
             Padding = new Thickness(ScrimPaddingX, ScrimPaddingY, ScrimPaddingX, ScrimPaddingY),
             ClipToBounds = true,
-            Child = new TextBlock
+            Child = Outlined(edge, fontSize, () => new TextBlock
             {
                 Text = line.TranslatedText,
-                FontFamily = TextFont,
+                FontFamily = _textFont,
                 FontSize = fontSize,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = foreground,
@@ -527,7 +586,7 @@ public partial class RealtimeBlockWindow : Window
                 HorizontalAlignment = wrapped
                     ? System.Windows.HorizontalAlignment.Center
                     : System.Windows.HorizontalAlignment.Stretch,
-            }
+            })
         };
 
         Canvas.SetLeft(background, patchLeft);
@@ -538,11 +597,163 @@ public partial class RealtimeBlockWindow : Window
         return new LineVisual(background, text, patchBounds);
     }
 
+    /// <summary>
+    /// A group read off a tilted card: set level in the card's own frame, and turned or sheared back
+    /// onto the card with the band or the repaired patch under it — see <see cref="Services.Ocr.TiltedText"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>The same two looks as a level line, in the card's shape. The band is the level box
+    /// with this window's padding and corners, transformed with the text; the repaired patch is cut
+    /// from the same repair as every other patch, its upright crop clipped to the band grown by a
+    /// guard and to the quadrilaterals the repair erased, so nothing it erased is left uncovered
+    /// and nothing beside the card is pasted over.</para>
+    ///
+    /// <para>Sized as a level group is, against the level box rather than the upright one: the
+    /// width is the length of the card's lines, and the height its comment's lines, so a
+    /// translation that wraps stays inside the comment it stands in for.</para>
+    /// </remarks>
+    private LineVisual? BuildTiltedLine(
+        TranslatedBlock line, Services.Ocr.TiltedText tilt, double canvasWidth, double canvasHeight,
+        System.Drawing.Bitmap? frame, System.Drawing.Bitmap? repairedFrame)
+    {
+        Point ToCanvas(Point pixel) => new(pixel.X / _dpiX, pixel.Y / _dpiY);
+
+        var level = tilt.Box;
+        double boxLeft = level.X / _dpiX, boxTop = level.Y / _dpiY;
+        double boxWidth = level.Width / _dpiX, boxHeight = level.Height / _dpiY;
+        if (boxWidth <= 0 || boxHeight <= 0) return null;
+
+        bool isGrouped = line.SourceLineBounds is { Count: > 1 };
+        double fontGlyphHeight = GetFontGlyphHeight(line, boxHeight);
+        double fontSize = SourceFontScale.Calculate(fontGlyphHeight, _latinSourceToCjkTarget);
+        // A single line is held to the height of the line it replaces, as a level one is.
+        if (!isGrouped)
+            fontSize = Math.Max(MinFontSize, Math.Min(fontSize, fontGlyphHeight * MaxHeightOverSource));
+
+        var typeface = new Typeface(_textFont, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
+        double textWidth = Math.Max(20, boxWidth);
+        bool wrapped = isGrouped;
+        if (!isGrouped)
+        {
+            // One line stays one line while it can, shrinking to the readability floor first — a
+            // wrap inside the height of one line is two lines cut in half.
+            double measured = Measure(line.TranslatedText, typeface, fontSize, null).Width;
+            if (measured > textWidth)
+                fontSize = Math.Max(MinFontSize, fontSize * textWidth / measured);
+            wrapped = Measure(line.TranslatedText, typeface, fontSize, null).Width > textWidth;
+        }
+        if (wrapped)
+            fontSize = FitWrapped(line.TranslatedText, typeface, fontSize, textWidth, boxHeight * MaxHeightOverSource);
+        double textHeight = Measure(line.TranslatedText, typeface, fontSize, wrapped ? textWidth : null).Height;
+
+        double bandWidth = textWidth + ScrimPaddingX * 2;
+        double bandHeight = Math.Max(boxHeight, textHeight) + ScrimPaddingY * 2;
+        double bandLeft = boxLeft - ScrimPaddingX;
+        double bandTop = boxTop + boxHeight / 2 - bandHeight / 2;
+        var turn = TiltedPlacement.For(tilt, ToCanvas, bandLeft, bandTop);
+
+        Border? background = null;
+        var patchBounds = default(System.Drawing.Rectangle);
+        if (_naturalBackground)
+        {
+            // The band in capture pixels, grown by the same guard a level patch has, and every
+            // quadrilateral the repair erased: a patch is a copy of the repair, and anything erased
+            // outside it would show the source again.
+            double guardX = Math.Clamp(fontGlyphHeight * 0.20, MinNaturalGuardX, 20) * _dpiX;
+            double guardY = Math.Clamp(fontGlyphHeight * 0.40, MinNaturalGuardY, 26) * _dpiY;
+            var band = new Rect(bandLeft * _dpiX, bandTop * _dpiY, bandWidth * _dpiX, bandHeight * _dpiY);
+            Point[][] shape = [TiltedPlacement.Outline(tilt, band, guardX, guardY), .. tilt.EraseQuads];
+            var reach = Services.Ocr.TiltedText.Enclosing(shape.SelectMany(polygon => polygon));
+            var crop = ToPhysicalPatchBounds(reach.X / _dpiX, reach.Y / _dpiY, reach.Width / _dpiX, reach.Height / _dpiY);
+
+            // Upright, unlike the band: the refresh repaints it with a fresh crop of this same
+            // rectangle, so it is the clip and not the element that takes the card's shape. Where
+            // the capture failed it is the scrim's colour in that shape until a refresh succeeds.
+            double patchLeft = crop.X / _dpiX, patchTop = crop.Y / _dpiY;
+            patchBounds = crop;
+            background = new Border
+            {
+                Width = crop.Width / _dpiX,
+                Height = crop.Height / _dpiY,
+                Background = (System.Windows.Media.Brush?)BuildNaturalBrush(repairedFrame, crop) ?? _scrimBrush,
+                Clip = TiltedPlacement.Shape(shape, ToCanvas, patchLeft, patchTop),
+            };
+            Canvas.SetLeft(background, patchLeft);
+            Canvas.SetTop(background, patchTop);
+
+            // Round the band, as with the band drawn in colour, rather than round the patch: the
+            // patch's own edge is upright and the clip left only its corners, and the guarded band
+            // it is cut to reaches into the comments either side, so on the 30° card every outline
+            // crossed its neighbours'. Inset by half the stroke, as a Border's lies inside its box.
+            if (_border)
+            {
+                double inset = RealtimeSubtitleColors.BorderThickness / 2;
+                background.Child = new System.Windows.Shapes.Path
+                {
+                    Data = TiltedPlacement.Shape(
+                        [TiltedPlacement.Outline(tilt, band, -inset * _dpiX, -inset * _dpiY)],
+                        ToCanvas, patchLeft, patchTop),
+                    Stroke = BorderBrushFor(line),
+                    StrokeThickness = RealtimeSubtitleColors.BorderThickness,
+                    StrokeLineJoin = PenLineJoin.Miter,
+                };
+            }
+        }
+        else
+        {
+            background = new Border
+            {
+                Width = bandWidth,
+                Height = bandHeight,
+                Background = _scrimBrush,
+                CornerRadius = new CornerRadius(BandCornerRadius),
+                RenderTransform = turn,
+            };
+            Canvas.SetLeft(background, bandLeft);
+            Canvas.SetTop(background, bandTop);
+            patchBounds = ToPhysicalPatchBounds(bandLeft, bandTop, bandWidth, bandHeight);
+            // Turned with the band, so the band's own outline is already the card's shape.
+            ApplyBorder(background, line);
+        }
+
+        var (foreground, edge) = SampleForeground(frame, line);
+        var text = new Border
+        {
+            Width = bandWidth,
+            Height = bandHeight,
+            Padding = new Thickness(ScrimPaddingX, ScrimPaddingY, ScrimPaddingX, ScrimPaddingY),
+            ClipToBounds = true,
+            RenderTransform = turn,
+            Child = Outlined(edge, fontSize, () => new TextBlock
+            {
+                Text = line.TranslatedText,
+                FontFamily = _textFont,
+                FontSize = fontSize,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = foreground,
+                TextWrapping = wrapped ? TextWrapping.Wrap : TextWrapping.NoWrap,
+                TextTrimming = TextTrimming.None,
+                VerticalAlignment = VerticalAlignment.Center,
+                // Against the card's margin, where its lines begin: a comment on a card is set
+                // ragged right, and the box's left edge is that margin.
+                TextAlignment = TextAlignment.Left,
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Left,
+            })
+        };
+        Canvas.SetLeft(text, bandLeft);
+        Canvas.SetTop(text, bandTop);
+
+        return new LineVisual(background, text, patchBounds);
+    }
+
     private IEnumerable<LineVisual> BuildVisuals(
         double canvasWidth, double canvasHeight, System.Drawing.Bitmap? frame)
     {
         using var repairedFrame = _naturalBackground ? RepairNaturalFrame(frame, _lines) : null;
-        var typeface = new Typeface(TextFont, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
+        // Read out of the repair once, and only when a column is about to ask for a plate.
+        var backdrop = new Lazy<CaptureBubbleBackdrop?>(() =>
+            repairedFrame is null ? null : CaptureBubbleBackdrop.FromRepaired(repairedFrame));
+        var typeface = new Typeface(_textFont, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
         foreach (var block in _lines)
         {
             if (string.IsNullOrWhiteSpace(block.TranslatedText)) continue;
@@ -556,13 +767,21 @@ public partial class RealtimeBlockWindow : Window
                 // about lines that run across — one wraps a paragraph into rows, the other fits a
                 // band to the row it replaces — and neither question exists for a column. What the
                 // mode still decides for a vertical block is upstream, in how the frame was read.
-                if (BuildVerticalLine(block, canvasWidth, canvasHeight, frame, repairedFrame) is { } column)
+                if (BuildVerticalLine(block, canvasWidth, canvasHeight, frame, repairedFrame, backdrop) is { } column)
                     yield return column;
+            }
+            else if (block.Tilt is not null)
+            {
+                // Before the mode, for the same reason a column is: a group off a tilted card is
+                // set along the card, and splitting it into level rows would lay each row across the
+                // comments either side of it — see Ocr.TiltedText.
+                if (BuildLine(block, canvasWidth, canvasHeight, frame, repairedFrame) is { } tilted)
+                    yield return tilted;
             }
             else if (_mode == RealtimeBlockMode.Panel)
             {
                 double fontSize = Math.Max(1, Math.Min(
-                    SourceFontScale.Calculate(GetGlyphHeight(block, block.Bounds.Height / _dpiY),
+                    SourceFontScale.Calculate(GetFontGlyphHeight(block, block.Bounds.Height / _dpiY),
                         _latinSourceToCjkTarget),
                     (block.SourceLineBounds ?? [block.Bounds]).Min(r => r.Height) / _dpiY / LineHeightRatio));
                 var rows = RealtimePanelLines.Split(block,
@@ -620,8 +839,12 @@ public partial class RealtimeBlockWindow : Window
     /// </remarks>
     private LineVisual? BuildVerticalLine(
         TranslatedBlock line, double canvasWidth, double canvasHeight,
-        System.Drawing.Bitmap? frame, System.Drawing.Bitmap? repairedFrame)
+        System.Drawing.Bitmap? frame, System.Drawing.Bitmap? repairedFrame,
+        Lazy<CaptureBubbleBackdrop?> backdrop)
     {
+        if (line.Tilt is { Column: true } tilt)
+            return BuildTiltedVerticalLine(line, tilt, canvasWidth, frame, repairedFrame, backdrop);
+
         double left = line.Bounds.X / _dpiX;
         double top = line.Bounds.Y / _dpiY;
         double sourceWidth = line.Bounds.Width / _dpiX;
@@ -679,6 +902,21 @@ public partial class RealtimeBlockWindow : Window
         double patchWidth = scrimWidth;
         double patchHeight = scrimHeight;
         ImageBrush? naturalBrush = null;
+        var (foreground, edge) = SampleForeground(frame, line);
+
+        if (_naturalBackground && frame is not null && backdrop.Value is { } plates
+            && Plated(line, plates, frame, cellPreferred, foreground.Color,
+                scrimLeft, scrimTop, scrimWidth, scrimHeight) is { } plated)
+        {
+            // The capture overlay's bubble rather than a repaired patch — see Plated. Its colour for
+            // the text replaces the sampled one, and the outline goes: the text was chosen against
+            // this plate, so it already reads on it.
+            foreground = plated.Text;
+            edge = null;
+            ApplyBorder(plated.Surface, line);
+            return VerticalVisual(line, plated.Surface, plated.Bounds, foreground, edge,
+                glyphs, cellSize, gridLeft, gridTop, gridWidth, gridHeight, plated.Replate);
+        }
 
         if (_naturalBackground)
         {
@@ -718,13 +956,260 @@ public partial class RealtimeBlockWindow : Window
         };
         ApplyBorder(background, line);
 
-        var foreground = _textBrush;
-        if (_sampleTextColor && frame is not null)
+        Canvas.SetLeft(background, patchLeft);
+        Canvas.SetTop(background, patchTop);
+        return VerticalVisual(line, background, patchBounds, foreground, edge,
+            glyphs, cellSize, gridLeft, gridTop, gridWidth, gridHeight, null);
+    }
+
+    /// <summary>
+    /// A column group off a tilted card or strip: set in the group's level box the way
+    /// <see cref="BuildVerticalLine"/> sets an upright one, and turned back onto the page with its
+    /// background — see <see cref="Services.Ocr.TiltedText"/> and <see cref="Services.Ocr.TiltedColumns"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>The same three looks as an upright column, each in the group's shape: the band turned
+    /// with the text; the plate cut to the turned band; and the repaired patch clipped to the band
+    /// grown by the guard and to the quadrilaterals the repair erased, as a tilted line's is (see
+    /// <see cref="BuildTiltedLine"/>).</para>
+    ///
+    /// <para>Sized on the level box, which is the room the columns really take. The upright box
+    /// round a turned group is wider by its length times the sine of the turn — 146px against about
+    /// 110 for the two columns of a strip at 12° in vertical-image-ja4 — and a grid fitted to that
+    /// has room for a column the source does not.</para>
+    ///
+    /// <para>Nothing is held inside the window: the box is already on the source, and clamping a
+    /// turned shape by its upright corners would pull it off the writing it covers.</para>
+    /// </remarks>
+    private LineVisual? BuildTiltedVerticalLine(
+        TranslatedBlock line, Services.Ocr.TiltedText tilt, double canvasWidth,
+        System.Drawing.Bitmap? frame, System.Drawing.Bitmap? repairedFrame,
+        Lazy<CaptureBubbleBackdrop?> backdrop)
+    {
+        Point ToCanvas(Point pixel) => new(pixel.X / _dpiX, pixel.Y / _dpiY);
+
+        var level = tilt.Box;
+        double left = level.X / _dpiX, top = level.Y / _dpiY;
+        double sourceWidth = level.Width / _dpiX, sourceHeight = level.Height / _dpiY;
+        if (sourceWidth <= 0 || sourceHeight <= 0) return null;
+
+        string glyphs = new([.. line.TranslatedText.Where(character => !char.IsWhiteSpace(character))]);
+        if (glyphs.Length == 0) return null;
+
+        double cellPreferred = Math.Max(MinFontSize, GetGlyphHeight(line, sourceWidth));
+        double columnLength = Math.Max(cellPreferred, sourceHeight);
+        double columnRoom = Math.Max(cellPreferred, sourceWidth);
+        double maxWidth = Math.Max(columnRoom, canvasWidth - ScrimPaddingX * 2);
+        var (cellSize, gridWidth, gridHeight) = VerticalTextGrid.FitWithin(
+            columnRoom, columnLength, maxWidth, cellPreferred, MinFontSize, glyphs.Length);
+
+        // Top of the source, centred across it — VerticalTextGrid.Cells' rule, in the level frame.
+        double gridLeft = left + (sourceWidth - gridWidth) / 2;
+        double gridTop = top;
+        double scrimLeft = Math.Min(gridLeft, left) - ScrimPaddingX;
+        double scrimTop = Math.Min(gridTop, top) - ScrimPaddingY;
+        double scrimWidth = Math.Max(gridLeft + gridWidth, left + sourceWidth) + ScrimPaddingX - scrimLeft;
+        double scrimHeight = Math.Max(gridTop + gridHeight, top + sourceHeight) + ScrimPaddingY - scrimTop;
+        // The band in capture pixels, in the level frame.
+        var band = new Rect(scrimLeft * _dpiX, scrimTop * _dpiY, scrimWidth * _dpiX, scrimHeight * _dpiY);
+        var turnText = TiltedPlacement.For(tilt, ToCanvas, gridLeft, gridTop);
+        var (foreground, edge) = SampleForeground(frame, line);
+
+        // Round the band, as a tilted line's patch is, rather than round the upright element it is
+        // painted on. Inset by half the stroke, as a Border's lies inside its box.
+        void Outline(Border surface, double surfaceLeft, double surfaceTop)
         {
-            var sampled = RealtimeNaturalBackground.SampleTextColor(frame, line.Bounds, _textBrush.Color);
-            foreground = Freeze(new SolidColorBrush(sampled));
+            if (!_border) return;
+            double inset = RealtimeSubtitleColors.BorderThickness / 2;
+            surface.Child = new System.Windows.Shapes.Path
+            {
+                Data = TiltedPlacement.Shape(
+                    [TiltedPlacement.Outline(tilt, band, -inset * _dpiX, -inset * _dpiY)],
+                    ToCanvas, surfaceLeft, surfaceTop),
+                Stroke = BorderBrushFor(line),
+                StrokeThickness = RealtimeSubtitleColors.BorderThickness,
+                StrokeLineJoin = PenLineJoin.Miter,
+            };
         }
 
+        if (_naturalBackground && frame is not null && backdrop.Value is { } plates)
+        {
+            // The plate an upright column gets (see Plated), cut to the turned band and fading out
+            // beyond it, as the capture overlay's tilted bubble is.
+            var outline = tilt.Corners(band);
+            double glyphPixels = cellPreferred * _dpiX;
+            double feather = CaptureBubbleBackdrop.Feather(glyphPixels);
+            var area = Services.Ocr.TiltedText.Enclosing(outline);
+            area.Inflate(feather, feather);
+            var wash = SourceTextColorSampler.Sample(frame, tilt.SampleArea)?.Background ?? _scrimBrush.Color;
+            var text = foreground.Color;
+            if (plates.Plate(area, wash, text, glyphPixels, band.Height, [outline]) is { } plate)
+            {
+                double plateLeft = area.X / _dpiX, plateTop = area.Y / _dpiY;
+                var surface = new Border
+                {
+                    Background = plate.Brush,
+                    Width = area.Width / _dpiX,
+                    Height = area.Height / _dpiY,
+                    ClipToBounds = true,
+                };
+                Canvas.SetLeft(surface, plateLeft);
+                Canvas.SetTop(surface, plateTop);
+                Outline(surface, plateLeft, plateTop);
+                return VerticalVisual(line, surface,
+                    ToPhysicalPatchBounds(plateLeft, plateTop, area.Width / _dpiX, area.Height / _dpiY),
+                    Freeze(new SolidColorBrush(plate.Text)), null,
+                    glyphs, cellSize, gridLeft, gridTop, gridWidth, gridHeight,
+                    next => next.Plate(area, wash, text, glyphPixels, band.Height, [outline])?.Brush, turnText);
+            }
+
+            // Read from inside the card: the upright box round the band is partly the page.
+            var sample = tilt.SampleArea;
+            if (plates.Card(sample, text) is { } card)
+            {
+                var surface = new Border
+                {
+                    Background = Freeze(new SolidColorBrush(card.Background)),
+                    Width = scrimWidth,
+                    Height = scrimHeight,
+                    RenderTransform = TiltedPlacement.For(tilt, ToCanvas, scrimLeft, scrimTop),
+                };
+                Canvas.SetLeft(surface, scrimLeft);
+                Canvas.SetTop(surface, scrimTop);
+                ApplyBorder(surface, line);
+                return VerticalVisual(line, surface,
+                    ToPhysicalPatchBounds(scrimLeft, scrimTop, scrimWidth, scrimHeight),
+                    Freeze(new SolidColorBrush(card.Text)), null,
+                    glyphs, cellSize, gridLeft, gridTop, gridWidth, gridHeight,
+                    next => next.Card(sample, text) is { } again ? Freeze(new SolidColorBrush(again.Background)) : null,
+                    turnText);
+            }
+        }
+
+        Border background;
+        System.Drawing.Rectangle patchBounds;
+        if (_naturalBackground)
+        {
+            // The guard an upright column has — generous across the column, where the dakuten sit —
+            // round the band, and every quadrilateral the repair erased: a patch is a copy of the
+            // repair, and anything erased outside it would show the source again.
+            double guardX = Math.Clamp(sourceWidth * 0.40, MinNaturalGuardY, 26) * _dpiX;
+            double guardY = Math.Clamp(sourceWidth * 0.20, MinNaturalGuardX, 20) * _dpiY;
+            Point[][] shape = [TiltedPlacement.Outline(tilt, band, guardX, guardY), .. tilt.EraseQuads];
+            var reach = Services.Ocr.TiltedText.Enclosing(shape.SelectMany(polygon => polygon));
+            var crop = ToPhysicalPatchBounds(reach.X / _dpiX, reach.Y / _dpiY, reach.Width / _dpiX, reach.Height / _dpiY);
+            double patchLeft = crop.X / _dpiX, patchTop = crop.Y / _dpiY;
+            patchBounds = crop;
+            background = new Border
+            {
+                Width = crop.Width / _dpiX,
+                Height = crop.Height / _dpiY,
+                Background = (System.Windows.Media.Brush?)BuildNaturalBrush(repairedFrame, crop) ?? _scrimBrush,
+                Clip = TiltedPlacement.Shape(shape, ToCanvas, patchLeft, patchTop),
+            };
+            Canvas.SetLeft(background, patchLeft);
+            Canvas.SetTop(background, patchTop);
+            Outline(background, patchLeft, patchTop);
+        }
+        else
+        {
+            background = new Border
+            {
+                Width = scrimWidth,
+                Height = scrimHeight,
+                Background = _scrimBrush,
+                CornerRadius = new CornerRadius(BandCornerRadius),
+                RenderTransform = TiltedPlacement.For(tilt, ToCanvas, scrimLeft, scrimTop),
+            };
+            Canvas.SetLeft(background, scrimLeft);
+            Canvas.SetTop(background, scrimTop);
+            patchBounds = ToPhysicalPatchBounds(scrimLeft, scrimTop, scrimWidth, scrimHeight);
+            // Turned with the band, so the band's own outline is already the group's shape.
+            ApplyBorder(background, line);
+        }
+
+        return VerticalVisual(line, background, patchBounds, foreground, edge,
+            glyphs, cellSize, gridLeft, gridTop, gridWidth, gridHeight, null, turnText);
+    }
+
+    /// <summary>
+    /// A column's background painted the way the capture overlay paints a bubble: the repair,
+    /// blurred, washed toward the sampled colour and faded out at the edges — or a flat card where
+    /// the surface is flat enough that a plate would only be a blurred card.
+    /// </summary>
+    /// <remarks>
+    /// <para>Vertical only, and only with the background on 自動. A repaired patch on a manga page is
+    /// the page's own screentone and linework with the words taken out, and on black-and-white
+    /// picture what the repair leaves behind still competes with the translation drawn over it; the
+    /// capture overlay's plate is the answer already made for exactly that. Horizontal lines are
+    /// subtitles and game text over moving picture, where the repaired patch is what reads as the
+    /// scene, and they are left as they were.</para>
+    ///
+    /// <para>The decision between plate and card is the backdrop's own
+    /// (<see cref="CaptureBubbleBackdrop.Plate"/> and <see cref="CaptureBubbleBackdrop.Card"/>), made
+    /// on the same repair this window cuts its patches from, so there is one of each rather than a
+    /// realtime copy. The plate is larger than the bubble by its feather on every side and the text
+    /// keeps the bubble's geometry, so the ramp falls outside the translation, as it does there.</para>
+    /// </remarks>
+    private (Border Surface, System.Drawing.Rectangle Bounds, SolidColorBrush Text,
+        Func<CaptureBubbleBackdrop, System.Windows.Media.Brush?> Replate)? Plated(
+        TranslatedBlock line, CaptureBubbleBackdrop backdrop, System.Drawing.Bitmap frame,
+        double glyphSize, System.Windows.Media.Color text,
+        double left, double top, double width, double height)
+    {
+        if (width <= 0 || height <= 0) return null;
+        var bubble = new Rect(left * _dpiX, top * _dpiY, width * _dpiX, height * _dpiY);
+        double glyphPixels = glyphSize * _dpiX;
+        double feather = CaptureBubbleBackdrop.Feather(glyphPixels);
+        var area = new Rect(bubble.X - feather, bubble.Y - feather,
+            bubble.Width + feather * 2, bubble.Height + feather * 2);
+        var wash = SourceTextColorSampler.Sample(frame, line.Bounds)?.Background ?? _scrimBrush.Color;
+
+        // Vertical text fills its grid, so the written part is the whole bubble — as the capture
+        // overlay passes it.
+        if (backdrop.Plate(area, wash, text, glyphPixels, bubble.Height) is { } plate)
+        {
+            var surface = new Border
+            {
+                Background = plate.Brush,
+                Width = width + feather * 2 / _dpiX,
+                Height = height + feather * 2 / _dpiY,
+                ClipToBounds = true,
+            };
+            Canvas.SetLeft(surface, left - feather / _dpiX);
+            Canvas.SetTop(surface, top - feather / _dpiY);
+            return (surface, ToPhysicalPatchBounds(left - feather / _dpiX, top - feather / _dpiY,
+                    width + feather * 2 / _dpiX, height + feather * 2 / _dpiY),
+                Freeze(new SolidColorBrush(plate.Text)),
+                next => next.Plate(area, wash, text, glyphPixels, bubble.Height)?.Brush);
+        }
+
+        if (backdrop.Card(bubble, text) is { } card)
+        {
+            var surface = new Border
+            {
+                Background = Freeze(new SolidColorBrush(card.Background)),
+                Width = width,
+                Height = height,
+                ClipToBounds = true,
+            };
+            Canvas.SetLeft(surface, left);
+            Canvas.SetTop(surface, top);
+            return (surface, ToPhysicalPatchBounds(left, top, width, height),
+                Freeze(new SolidColorBrush(card.Text)),
+                next => next.Card(bubble, text) is { } again ? Freeze(new SolidColorBrush(again.Background)) : null);
+        }
+
+        return null;
+    }
+
+    /// <summary>A column's glyph cells over the background already built and placed for it.</summary>
+    private LineVisual VerticalVisual(
+        TranslatedBlock line, Border background, System.Drawing.Rectangle patchBounds,
+        SolidColorBrush foreground, SolidColorBrush? edge, string glyphs, double cellSize,
+        double gridLeft, double gridTop, double gridWidth, double gridHeight,
+        Func<CaptureBubbleBackdrop, System.Windows.Media.Brush?>? replate, Transform? turn = null)
+    {
         // One element per glyph, positioned by hand. A TextBlock cannot set type downwards, and the
         // alternatives — a rotated horizontal line, or a font feature — either turn every character
         // on its side or are unavailable on the fallback faces this has to survive on.
@@ -732,26 +1217,36 @@ public partial class RealtimeBlockWindow : Window
         foreach (var (glyph, cellBounds) in
                  VerticalTextGrid.Cells(glyphs, new Rect(0, 0, gridWidth, gridHeight), cellSize))
         {
-            var cell = new TextBlock
+            var drawn = VerticalTextGrid.VerticalGlyphFor(glyph, _targetLanguage);
+            TextBlock Cell(System.Windows.Media.Brush brush, double dx, double dy)
             {
-                Text = glyph.ToString(),
-                FontFamily = TextFont,
-                FontSize = cellSize * VerticalGlyphFill,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = foreground,
-                TextAlignment = TextAlignment.Center,
-            };
+                var cell = new TextBlock
+                {
+                    Text = drawn.Glyph.ToString(),
+                    FontFamily = drawn.Font ?? _textFont,
+                    FontSize = cellSize * VerticalGlyphFill,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = brush,
+                    TextAlignment = TextAlignment.Center,
+                };
 
-            // Brackets and dashes are drawn lying down in horizontal text and standing up in
-            // vertical: the glyph is the same, the orientation is not.
-            if (VerticalTextGrid.RotatesGlyph(glyph))
-            {
-                cell.RenderTransformOrigin = new System.Windows.Point(0.5, 0.5);
-                cell.RenderTransform = new RotateTransform(90);
+                // Brackets and dashes are drawn lying down in horizontal text and standing up in
+                // vertical: the glyph is the same, the orientation is not.
+                if (drawn.Rotates)
+                {
+                    cell.RenderTransformOrigin = new System.Windows.Point(0.5, 0.5);
+                    cell.RenderTransform = new RotateTransform(90);
+                }
+
+                VerticalTextGrid.PositionGlyph(cell, new Rect(
+                    cellBounds.X + dx, cellBounds.Y + dy, cellBounds.Width, cellBounds.Height));
+                return cell;
             }
 
-            VerticalTextGrid.PositionGlyph(cell, cellBounds);
-            cells.Children.Add(cell);
+            if (edge is not null)
+                foreach (var (dx, dy) in OutlineOffsets(cellSize * VerticalGlyphFill))
+                    cells.Children.Add(Cell(edge, dx, dy));
+            cells.Children.Add(Cell(foreground, 0, 0));
         }
 
         var textLayer = new Border
@@ -761,13 +1256,13 @@ public partial class RealtimeBlockWindow : Window
             ClipToBounds = true,
             Child = cells,
         };
+        // A tilted group's grid is laid out level and turned with its background.
+        if (turn is not null) textLayer.RenderTransform = turn;
 
-        Canvas.SetLeft(background, patchLeft);
-        Canvas.SetTop(background, patchTop);
         Canvas.SetLeft(textLayer, gridLeft);
         Canvas.SetTop(textLayer, gridTop);
 
-        return new LineVisual(background, textLayer, patchBounds);
+        return new LineVisual(background, textLayer, patchBounds, replate);
     }
 
     private LineVisual? BuildPanelLine(
@@ -779,10 +1274,7 @@ public partial class RealtimeBlockWindow : Window
         if (cell.IsEmpty || cell.Width <= 0 || cell.Height <= 0) return null;
         double left = cell.X / _dpiX, top = cell.Y / _dpiY;
         double width = cell.Width / _dpiX, height = cell.Height / _dpiY;
-        var foreground = _textBrush;
-        if (_sampleTextColor && frame is not null)
-            foreground = Freeze(new SolidColorBrush(
-                RealtimeNaturalBackground.SampleTextColor(frame, line.Bounds, _textBrush.Color)));
+        var (foreground, edge) = SampleForeground(frame, line);
         Border? background = null;
         var patchBounds = default(System.Drawing.Rectangle);
         if (scrim is { } scrimBounds && Rect.Intersect(scrimBounds, canvas) is { IsEmpty: false } patch)
@@ -811,12 +1303,12 @@ public partial class RealtimeBlockWindow : Window
                 StretchDirection = StretchDirection.DownOnly,
                 HorizontalAlignment = System.Windows.HorizontalAlignment.Left,
                 VerticalAlignment = VerticalAlignment.Center,
-                Child = new TextBlock
+                Child = Outlined(edge, fontSize, () => new TextBlock
                 {
-                    Text = line.TranslatedText, FontFamily = TextFont, FontSize = fontSize,
+                    Text = line.TranslatedText, FontFamily = _textFont, FontSize = fontSize,
                     FontWeight = FontWeights.SemiBold, Foreground = foreground,
                     TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.None,
-                },
+                }),
             },
         };
         Canvas.SetLeft(text, left);
@@ -890,11 +1382,18 @@ public partial class RealtimeBlockWindow : Window
 
                     using var repairedFrame = RepairNaturalFrame(frame, blocks, token);
                     if (repairedFrame is null) continue;
-                    var repainted = new List<(Border Surface, ImageBrush Brush)>(patches.Length);
+                    // A plate is blurred and faded, so it is only made again here, behind the
+                    // fingerprint above: when the picture under it has changed, not every tick.
+                    CaptureBubbleBackdrop? backdrop = null;
+                    var repainted = new List<(Border Surface, System.Windows.Media.Brush Brush)>(patches.Length);
                     foreach (var patch in patches)
                     {
                         token.ThrowIfCancellationRequested();
-                        if (BuildNaturalBrush(repairedFrame, patch.PatchBounds) is { } brush)
+                        System.Windows.Media.Brush? brush = patch.Replate is { } replate
+                            ? (backdrop ??= CaptureBubbleBackdrop.FromRepaired(repairedFrame)) is { } plates
+                                ? replate(plates) : null
+                            : BuildNaturalBrush(repairedFrame, patch.PatchBounds);
+                        if (brush is not null)
                             repainted.Add((patch.Surface, brush));
                     }
 
@@ -932,10 +1431,15 @@ public partial class RealtimeBlockWindow : Window
     }
 
     /// <summary>
-    /// The picture the repair is built from: this window's own rectangle, as the session's capture
-    /// backend sees it — which is to say, without this window in it.
+    /// The picture the repair is built from: the block's rectangle, as the session's capture backend
+    /// sees it — which is to say, without this window in it.
     /// </summary>
     /// <remarks>
+    /// The block's rectangle and not this window's, which are different places under 對照顯示. The
+    /// controller turns both readers of this off in that mode, so nothing reaches here then; reading
+    /// the source rectangle anyway is what keeps a future caller from repairing the picture under the
+    /// copy and pasting it over the block's own lines.
+    ///
     /// This used to be a <c>CopyFromScreen</c> of the same rectangle, and it read whatever was on
     /// screen, this overlay included. What kept the overlay out of it was
     /// <c>WDA_EXCLUDEFROMCAPTURE</c> on this window, which fails on every Windows before 11 24H2 —
@@ -957,11 +1461,11 @@ public partial class RealtimeBlockWindow : Window
     /// </remarks>
     private System.Drawing.Bitmap? CaptureUnderlyingRegion()
     {
-        if (_physBounds.Width <= 0 || _physBounds.Height <= 0) return null;
+        if (_sourceBounds.Width <= 0 || _sourceBounds.Height <= 0) return null;
 
         try
         {
-            return _grabUnderlying(_physBounds);
+            return _grabUnderlying(_sourceBounds);
         }
         catch (Exception ex)
         {
@@ -976,10 +1480,10 @@ public partial class RealtimeBlockWindow : Window
     private System.Drawing.Rectangle ToPhysicalPatchBounds(
         double left, double top, double width, double height)
     {
-        int x1 = Math.Clamp((int)Math.Floor(left * _dpiX), 0, _physBounds.Width);
-        int y1 = Math.Clamp((int)Math.Floor(top * _dpiY), 0, _physBounds.Height);
-        int x2 = Math.Clamp((int)Math.Ceiling((left + width) * _dpiX), 0, _physBounds.Width);
-        int y2 = Math.Clamp((int)Math.Ceiling((top + height) * _dpiY), 0, _physBounds.Height);
+        int x1 = Math.Clamp((int)Math.Floor(left * _dpiX), 0, _sourceBounds.Width);
+        int y1 = Math.Clamp((int)Math.Floor(top * _dpiY), 0, _sourceBounds.Height);
+        int x2 = Math.Clamp((int)Math.Ceiling((left + width) * _dpiX), 0, _sourceBounds.Width);
+        int y2 = Math.Clamp((int)Math.Ceiling((top + height) * _dpiY), 0, _sourceBounds.Height);
         return System.Drawing.Rectangle.FromLTRB(x1, y1, x2, y2);
     }
 
@@ -1073,6 +1577,17 @@ public partial class RealtimeBlockWindow : Window
         return heights[heights.Count / 2];
     }
 
+    /// <summary>
+    /// The glyph height the translation's font is sized from. The same as
+    /// <see cref="GetGlyphHeight"/> except on a tilted Latin line, where that one is the height the
+    /// slanted letters cover and this one is the height of the letters themselves — see
+    /// <see cref="OcrTextBlock.FontGlyphHeight"/>.
+    /// </summary>
+    private double GetFontGlyphHeight(TranslatedBlock line, double fallbackHeight) =>
+        line.FontGlyphHeight is { } glyphHeight && glyphHeight > 0
+            ? glyphHeight / _dpiY
+            : GetGlyphHeight(line, fallbackHeight);
+
     private Size Measure(string text, Typeface typeface, double fontSize, double? maxWidth)
     {
         var formatted = new FormattedText(
@@ -1098,6 +1613,69 @@ public partial class RealtimeBlockWindow : Window
         (targetLanguage.StartsWith("ZH", StringComparison.OrdinalIgnoreCase) ||
          targetLanguage.Equals("JA", StringComparison.OrdinalIgnoreCase) ||
          targetLanguage.Equals("KO", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The colour a line is written in, and the outline drawn around it when the source had one.
+    /// </summary>
+    /// <remarks>
+    /// Sampling is its own switch: with it off the reader's chosen colour is what gets drawn, and
+    /// with it on that colour is still what an unconvincing sample falls back to. Only a sampled
+    /// colour brings an outline; the reader's own colour is drawn the way they chose it.
+    /// </remarks>
+    private (SolidColorBrush Text, SolidColorBrush? Edge) SampleForeground(
+        System.Drawing.Bitmap? frame, TranslatedBlock line)
+    {
+        if (!_sampleTextColor || frame is null) return (_textBrush, null);
+        // On a tilted card, from inside the card: the upright box's ring is the page beside it.
+        var sampled = RealtimeNaturalBackground.SampleText(
+            frame, line.Tilt?.SampleArea ?? line.Bounds, _textBrush.Color);
+        return (Freeze(new SolidColorBrush(sampled.Text)),
+            sampled.Outline is { } outline ? Freeze(new SolidColorBrush(outline)) : null);
+    }
+
+    /// <summary>
+    /// The text as <paramref name="make"/> builds it, with an outline under it when there is one.
+    /// </summary>
+    /// <remarks>
+    /// <para>The outline is there because the source had one, and because it is what keeps the text
+    /// legible wherever it lands: a subtitle's white body with its black edge reads on a bright scene
+    /// and a dark one alike, and a realtime line is drawn over a repaired picture this window never
+    /// measured the contrast of. Without it, the white the source was written in would be white on
+    /// whatever bright picture the erase left behind, which is why, before the body could be told
+    /// from its edge, the edge's colour was what got drawn.</para>
+    ///
+    /// <para>Eight copies in the outline's colour, offset round a circle, under the text. A
+    /// <c>TextBlock</c> has no stroke; drawing its geometry with a pen would mean re-implementing
+    /// the wrapping and alignment it already does, and an effect renders the text through a bitmap,
+    /// which softens it. The copies are laid out exactly as the text is, so they cannot drift from
+    /// it, and there are at most a few lines in a window.</para>
+    /// </remarks>
+    private static UIElement Outlined(System.Windows.Media.Brush? edge, double fontSize, Func<TextBlock> make)
+    {
+        var text = make();
+        if (edge is null) return text;
+        var layers = new Grid();
+        foreach (var (dx, dy) in OutlineOffsets(fontSize))
+        {
+            var copy = make();
+            copy.Foreground = edge;
+            copy.RenderTransform = new TranslateTransform(dx, dy);
+            layers.Children.Add(copy);
+        }
+        layers.Children.Add(text);
+        return layers;
+    }
+
+    /// <summary>Where the outline's copies go: round a circle of 7% of the type size, 1-3px.</summary>
+    private static IEnumerable<(double X, double Y)> OutlineOffsets(double fontSize)
+    {
+        double radius = Math.Clamp(fontSize * .07, 1, 3);
+        for (int k = 0; k < 8; k++)
+        {
+            double angle = k * Math.PI / 4;
+            yield return (Math.Round(Math.Cos(angle) * radius, 2), Math.Round(Math.Sin(angle) * radius, 2));
+        }
+    }
 
     private static SolidColorBrush Freeze(SolidColorBrush brush)
     {

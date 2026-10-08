@@ -38,8 +38,14 @@ internal static class VerticalColumnGrouping
     /// caption and the columns around it is a question nothing here can answer, and guessing at it
     /// would put a name plate in the middle of somebody's dialogue.</para>
     /// </remarks>
+    /// <param name="language">
+    /// The source language, normalised. With it the rows are set across as a horizontal capture sets
+    /// them — see <see cref="WithRowsSetAcross"/>; without it they are handed on line by line, as
+    /// they were before, which is what the tests that build columns by hand still ask for.
+    /// </param>
     internal static List<OcrTextBlock> Group(
-        List<OcrTextBlock> blocks, double frameWidth, bool realtime = false, Bitmap? bitmap = null)
+        List<OcrTextBlock> blocks, double frameWidth, bool realtime = false, Bitmap? bitmap = null,
+        string? language = null)
     {
         // The collapse test only; the short-and-unsure test waits for the groups — see the remarks
         // on WithoutUnconvincingGroups for why asking it of a column throws balloons away.
@@ -87,7 +93,7 @@ internal static class VerticalColumnGrouping
         // The readings go first. What is left is then the page's real writing, which is what the row
         // test has to be asked against: a reading IS a column, and a reading sitting on a sign made
         // the row test drop the sign — 迷宮入り口 thrown away because ぐち lay on it.
-        var groups = WithoutWordlessGroups(WithoutRowsOverColumns(WithoutRuby(merged)));
+        var groups = WithoutWordlessGroups(WithoutRowsOverColumns(WithoutRuby(merged), candidates));
         if (realtime) groups = WithoutUnconvincingGroups(groups);
 
         // The suspected readings join HERE rather than above, and the position is the whole of it.
@@ -107,7 +113,71 @@ internal static class VerticalColumnGrouping
             [.. readings.Select(reading => CombineColumns([reading]))]);
         groups.AddRange(aside.Where(reading =>
             SaysMoreThanOneCharacter(reading) && !groups.Any(body => IsRubyOver(reading, body))));
-        return groups;
+        return language is null ? groups : WithRowsSetAcross(groups, language, realtime, pixels);
+    }
+
+    /// <summary>
+    /// The rows that came through, read the way a horizontal capture reads them: measured as lines,
+    /// joined into sentences, and given back their tilt.
+    /// </summary>
+    /// <remarks>
+    /// <para>Before this a row was handed on exactly as the column pipeline prepared it — one line,
+    /// one translation, a glyph size from its upright box's area. On a tilted card that is every
+    /// line translated alone and drawn level over its neighbours, at three times the size of the
+    /// type: what the horizontal pipeline stopped doing in #246–#248. A caption box of three level
+    /// lines was three translations of a third of a sentence.</para>
+    ///
+    /// <para>LAST, and on the rows that survived, and that order is what keeps the columns where
+    /// they were. Everything above reads the rows as they are prepared for columns — the ruby test
+    /// takes a row as the body of a reading by its RenderGlyphHeight and Bounds, the row filters
+    /// measure a row against the columns by its Bounds — and normalising a CJK line rewrites both.
+    /// Doing it first would move readings and rows on pages where nothing runs across at an angle.
+    /// So every decision about a column is made exactly as before, and only what is then drawn for
+    /// the rows changes.</para>
+    ///
+    /// <para>Each row starts again from what the detector and recogniser gave — its text, box,
+    /// score and quadrilateral — so that the chain it goes through is the horizontal one end to
+    /// end, filters and all, rather than one that inherits half of the column preparation.</para>
+    /// </remarks>
+    private static List<OcrTextBlock> WithRowsSetAcross(
+        List<OcrTextBlock> groups, string language, bool realtime, SkiaSharp.SKBitmap? pixels)
+    {
+        int first = groups.FindIndex(group => group.RunsAcross);
+        if (first < 0)
+            return groups;
+
+        var rows = groups
+            .Where(group => group.RunsAcross)
+            .Select(row => new OcrTextBlock(row.Text, row.Bounds, Confidence: row.Confidence)
+            {
+                LineGeometry = row.LineGeometry,
+            })
+            .OrderBy(row => row.Bounds.Y)
+            .ThenBy(row => row.Bounds.X)
+            .ToList();
+
+        var lines = OnnxOcrEngine.ApplyBlockFilters(
+            rows,
+            language,
+            OcrLanguageRouter.UsesCjkOnnx(language),
+            OcrLanguageRouter.UsesAutomaticLayout(language));
+
+        // The live path has no block mode to honour here — a vertical block does not ask for one —
+        // so its rows are grouped as a panel's are: the general rules, not the subtitle strip's.
+        var set = realtime
+            ? OcrService.GroupRealtime(lines, pixels?.Height ?? 0, Realtime.RealtimeBlockMode.Panel)
+            : OcrService.GroupScreenshot(pixels, lines, GroupingProfile.General);
+
+        var result = new List<OcrTextBlock>(groups.Count);
+        for (int i = 0; i < groups.Count; i++)
+        {
+            if (i == first)
+                result.AddRange(set.Select(group => group with { RunsAcross = true }));
+            if (!groups[i].RunsAcross)
+                result.Add(groups[i]);
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -289,12 +359,50 @@ internal static class VerticalColumnGrouping
     /// middle of a balloon that already has its own. A row over a column is always one of these two
     /// and never a third thing, so dropping it cannot cost writing that would otherwise be read.</para>
     /// </remarks>
-    internal static List<OcrTextBlock> WithoutRowsOverColumns(List<OcrTextBlock> groups) =>
+    internal static List<OcrTextBlock> WithoutRowsOverColumns(
+        List<OcrTextBlock> groups, IReadOnlyList<OcrTextBlock>? columns = null) =>
         !groups.Any(group => group.RunsAcross) || !groups.Any(group => !group.RunsAcross)
             ? groups
-            : [.. groups.Where(group => !group.RunsAcross || !groups.Any(column =>
-                !column.RunsAcross && RunsDownThePage(column) &&
-                LiesOn(group.Bounds, column.Bounds) >= RowLyingOnColumns))];
+            : [.. groups.Where(group => !group.RunsAcross || !(
+                groups.Any(column =>
+                    !column.RunsAcross && RunsDownThePage(column) &&
+                    LiesOn(group.Bounds, column.Bounds) >= RowLyingOnColumns) ||
+                (columns ?? []).Any(column =>
+                    RunsDownThePage(column) && Near(group.Bounds, column.Bounds))))];
+
+    /// <summary>
+    /// Whether a row reaches a column once it is grown by its own height on every side.
+    /// </summary>
+    /// <remarks>
+    /// <para>Asked of the COLUMNS as they were read, before any of them were joined, because on the
+    /// pages this exists for the joined groups say nothing. MEASURED on
+    /// <c>vertical-image-ja3/zang-songnofuriren-001-147hua</c>: the columns there are read in pieces —
+    /// <c>空から降り注いだ</c> comes back as <c>空から</c> and single-character boxes — and the pieces
+    /// joined make groups WIDER than they are tall (<c>空からそそりの</c> 132x94), so the rule above, which
+    /// lets only a balloon overrule a row, never fires. Seven of the ten rows the screenshot flow
+    /// returned lay on columns, and the page holds no writing across at all.</para>
+    ///
+    /// <para>Grown, because a row made of column heads does not always overlap what is left of those
+    /// columns: the heads are gone from them, so each column's box starts just under the row.
+    /// <c>調画</c> and <c>代遠</c> touch nothing and sit 0.7 of a row's height from the columns they were
+    /// taken from. The whole height and not half: at half, <c>調画</c> and <c>俺流兄</c> stay.</para>
+    ///
+    /// <para>The user's terms: rows may be lost, the columns may not be touched. What it costs, over
+    /// every vertical corpus: none of the eleven real rows on <c>vertical-image-ja2</c> (plates,
+    /// narration boxes, scene labels); a series title on <c>vertical-image-ja3</c>, the magazine's
+    /// cover titles and captions on <c>vertical-manga-web</c> and <c>vertical-image-ja</c>, and the one real
+    /// row on the new pages (<c>次回、三度目の"魔法"</c>, in the realtime flow). No column group changes on
+    /// any of them. Two narrower rules measured and left: touching without growing leaves four of the
+    /// fakes, and "two columns start under it" catches none that growing does not and loses the same
+    /// title.</para>
+    /// </remarks>
+    private static bool Near(Rect row, Rect column)
+    {
+        var grown = new Rect(
+            row.X - row.Height, row.Y - row.Height, row.Width + 2 * row.Height, row.Height * 3);
+        var shared = Rect.Intersect(grown, column);
+        return !shared.IsEmpty && shared.Width > 0 && shared.Height > 0;
+    }
 
     /// <summary>
     /// Whether a group is writing that actually runs down the page, rather than something short
@@ -347,20 +455,136 @@ internal static class VerticalColumnGrouping
                 }
             }
 
-            merged.Add(CombineColumns(group));
+            merged.AddRange(ReadingBlocks(group).Select(CombineColumns));
         }
 
         return merged;
     }
 
-    private static bool IsColumnCandidate(OcrTextBlock column)
+    /// <summary>
+    /// How much of the shorter of two runs of columns has to lie alongside the other for the two to
+    /// be one block, when a group is cut into the blocks a reader reads it as.
+    /// </summary>
+    /// <remarks>
+    /// <para>A group of columns joined pair by pair can hold two blocks the page set apart: a remark
+    /// and, stepped down to its left, the next one — 最後だからこそだ。 and 俺はロベルーア領総督の…
+    /// (zang), だが、 and 誰かじゃ駄目なんだな。 Every column of the one runs alongside a column of the
+    /// other, so the pairs join; the two RUNS, right and left of the step, hardly overlap. So each
+    /// group is cut where the columns to the right of a cut and the columns to the left of it share
+    /// least of their height, if they share less than this, and each side is asked again.</para>
+    ///
+    /// <para>MEASURED on the 58 vertical pages labelled block by block
+    /// (<c>.ai/vertical-ja3-handoff/overmerge/blocks-*.json</c>), the best cut of every group: the
+    /// ones between two blocks share 0.27–0.63 of the shorter run, and the ones through a block 0.71
+    /// and more — a first column set higher than the rest, ちょっと悪いんだけど beside
+    /// そこの魔法陣に入って頂戴 at 0.72, and ragged detections. The bar sits in the gap. One cut
+    /// under it, at 0.46, goes through a column the detector ran across two blocks (below), which
+    /// was two blocks in one group before it was cut. The manga
+    /// models' bar for the same question (<see cref="Manga.MangaPageLayout.SideBySideShare"/>) is
+    /// higher because it compares whole blocks the detector boxed, not columns with their ruby and
+    /// fragments.</para>
+    ///
+    /// <para>No cut is made across the columns, for blocks one above the other. Pairs of columns
+    /// one above the other do not join in the first place (<see cref="SideBySideAlongTheColumn"/>);
+    /// where two such blocks came back as one group on those pages, the detector had read a column
+    /// of the one and a column of the other as a single column (魔力を over この, 4px apart on zang
+    /// 19 08 58), which no cut between columns can part.</para>
+    /// </remarks>
+    private const double RunsAlongside = 0.65;
+
+    private static IEnumerable<List<OcrTextBlock>> ReadingBlocks(List<OcrTextBlock> group)
     {
+        if (group.Count < 2)
+        {
+            yield return group;
+            yield break;
+        }
+
+        // Right to left, as they are read.
+        var ordered = group.OrderByDescending(column => (column.LayoutBounds.Left + column.LayoutBounds.Right) / 2).ToList();
+        int cut = 0;
+        double least = RunsAlongside;
+        for (int k = 1; k < ordered.Count; k++)
+        {
+            var (rightTop, rightBottom) = Span(ordered.Take(k));
+            var (leftTop, leftBottom) = Span(ordered.Skip(k));
+            if (OneAboveTheOther(ordered.Take(k), ordered.Skip(k))) continue;
+
+            double shared = Math.Min(rightBottom, leftBottom) - Math.Max(rightTop, leftTop);
+            double shorter = Math.Min(rightBottom - rightTop, leftBottom - leftTop);
+            if (shorter > 0 && shared < least * shorter)
+            {
+                least = shared / shorter;
+                cut = k;
+            }
+        }
+
+        if (cut == 0)
+        {
+            yield return group;
+            yield break;
+        }
+
+        foreach (var part in ReadingBlocks(ordered.Take(cut).ToList())) yield return part;
+        foreach (var part in ReadingBlocks(ordered.Skip(cut).ToList())) yield return part;
+
+        static (double Top, double Bottom) Span(IEnumerable<OcrTextBlock> columns) =>
+            (columns.Min(column => column.LayoutBounds.Top), columns.Max(column => column.LayoutBounds.Bottom));
+
+        // Runs sharing more than half the narrower one's width are one above the other, not a step to
+        // the left: a word whose column came back as two pieces, 霊 over 麻？ (ja3 432/002), 歌 over 吹
+        // (472/007), their readings beside them nudging the pieces' centres apart. Parted, they were
+        // two bubbles of half a word each; no cut between two blocks on the 58 labelled pages is lost.
+        static bool OneAboveTheOther(IEnumerable<OcrTextBlock> right, IEnumerable<OcrTextBlock> left)
+        {
+            double rightLeft = right.Min(column => column.LayoutBounds.Left), rightRight = right.Max(column => column.LayoutBounds.Right);
+            double leftLeft = left.Min(column => column.LayoutBounds.Left), leftRight = left.Max(column => column.LayoutBounds.Right);
+            double shared = Math.Min(rightRight, leftRight) - Math.Max(rightLeft, leftLeft);
+            return shared > 0.5 * Math.Min(rightRight - rightLeft, leftRight - leftLeft);
+        }
+    }
+
+    private static bool IsColumnCandidate(OcrTextBlock column) => !RunsAcross(column);
+
+    /// <summary>
+    /// How much longer than thick a detector quadrilateral lying within 45° of level has to be for
+    /// its writing to be taken as running across, whatever its upright box says.
+    /// </summary>
+    /// <remarks>
+    /// <para>The upright box alone misreads a tilted line: turned 30°, a line of type has an upright
+    /// box hardly wider than tall, and turned further it has one TALLER than wide. On the tilted
+    /// cards of <c>region-comic-en-3</c> the narrowest long line was 310x200 — 1.55 against the bar
+    /// of 1.4 below — and "TOO." at 55x41 went under it, was taken for a column and was not on the
+    /// screen at all. The quadrilateral is not turned by the tilt: "TOO." measures 49x25 along
+    /// itself.</para>
+    ///
+    /// <para>MEASURED over the 171 vertical pages, every box the two tests disagree on. Asked
+    /// INSTEAD of the upright box, two to one demotes 20 boxes that are rows today — page numbers
+    /// (184, 105), 読む, 剣聖, 心の壁, 1.7 to 1.9 along themselves — to columns, and still misses
+    /// "TOO." at 1.96. So it is asked AS WELL, never instead: a box either test calls a row is one.
+    /// At 1.6 that adds five boxes to the rows — "TOO.", びっいり and どど lettered at 36–38° on
+    /// mokuro-001b, and two misreads, mn and 00 — and at 1.4 it adds twelve, the rest of them
+    /// two-character readings and numbers that are squarer than any line.</para>
+    /// </remarks>
+    internal const double AcrossAlongItself = 1.6;
+
+    /// <summary>
+    /// Whether a block is writing that runs across the page — a name plate, a caption, a tilted
+    /// line — rather than a column to be merged with the others.
+    /// </summary>
+    internal static bool RunsAcross(OcrTextBlock block)
+    {
+        int characters = block.Text.Count(character => !char.IsWhiteSpace(character));
+        if (characters <= 1)
+            return false;
+
         // Issue #132's Japanese corpus had six multi-character detections wider than 1.4: all six
         // were horizontal UI or signs, while none of the 188 vertical detections crossed it.
         const double maxWidthToHeightRatio = 1.4;
-        int characters = column.Text.Count(character => !char.IsWhiteSpace(character));
-        return characters <= 1 ||
-               column.LayoutBounds.Width <= column.LayoutBounds.Height * maxWidthToHeightRatio;
+        return block.LayoutBounds.Width > block.LayoutBounds.Height * maxWidthToHeightRatio ||
+               block.LineGeometry is { } line &&
+               Math.Abs(line.AngleDegrees) <= OcrLineGeometry.TiltedToDegrees &&
+               line.Length >= line.Thickness * AcrossAlongItself;
     }
 
     /// <summary>
@@ -417,11 +641,31 @@ internal static class VerticalColumnGrouping
     /// </remarks>
     private const double SideBySideAlongTheColumn = 0.35;
 
+    /// <summary>
+    /// How far apart two columns may be, in characters of the SMALLER type of the two.
+    /// </summary>
+    /// <remarks>
+    /// <para>The distance bar is 1.6 characters of the larger type, which is right inside a balloon —
+    /// a reading or a short column comes back with a pitch that is too small, and the larger one is
+    /// the balloon's — and wrong between a line of big lettering and a balloon beside it. The big
+    /// type stretches the bar to reach the next balloon: on ja3 432/002 the 134px column 火鉢の炭…！
+    /// took in ご心配いただき恐縮ですわ／わたくしは無事です, 26px type, 4.1 of its characters away.</para>
+    ///
+    /// <para>MEASURED, every pair this method joins over the 175 vertical pages at hand, against the
+    /// manga models' grouping of the same page: the pairs of one group are 1.6 of the smaller type
+    /// apart or less in 1701 of 1904 and more than 4 in three: a reading over its word, a misread
+    /// column, and 遠っ lettered beside a balloon, which the models' grouping had wrong. Taking the
+    /// smaller pitch for the whole bar instead split balloons everywhere (zang, ja3 and ja2 lost 14,
+    /// 10 and 17 whole sentences); capping it at 4 changed six pages of the 175, no sentence on the
+    /// transcribed ones, and parted the lettering from the balloons on two.</para>
+    /// </remarks>
+    private const double SmallerTypeReach = 4;
+
     private static bool IsSameGroup(OcrTextBlock a, OcrTextBlock b)
     {
         // Detector padding is not character size. Compare centres and character pitch so
         // a generous quad cannot bridge a gutter into the next balloon or manga panel.
-        double pitch = Math.Max(VerticalOcrGeometry.GlyphPitch(a), VerticalOcrGeometry.GlyphPitch(b));
+        double pa = VerticalOcrGeometry.GlyphPitch(a), pb = VerticalOcrGeometry.GlyphPitch(b);
 
         double shared = Math.Min(a.LayoutBounds.Bottom, b.LayoutBounds.Bottom) -
                         Math.Max(a.LayoutBounds.Top, b.LayoutBounds.Top);
@@ -431,7 +675,7 @@ internal static class VerticalColumnGrouping
 
         double distance = Math.Abs((a.LayoutBounds.Left + a.LayoutBounds.Right) / 2 -
                                    (b.LayoutBounds.Left + b.LayoutBounds.Right) / 2);
-        return distance <= pitch * 1.6;
+        return distance <= Math.Max(pa, pb) * 1.6 && distance <= Math.Min(pa, pb) * SmallerTypeReach;
     }
 
     private static OcrTextBlock CombineColumns(List<OcrTextBlock> group)
@@ -465,7 +709,12 @@ internal static class VerticalColumnGrouping
             // title down the spine of a book is still Latin.
             layoutScript,
             ordered.Select(column => column.LayoutBounds).Aggregate(Rect.Union),
-            CombineGlyphSize(layoutScript, ordered));
+            CombineGlyphSize(layoutScript, ordered))
+        {
+            // Only how the group is drawn and erased: what it says, where it is and how big its
+            // letters are stay as they would be for a straight group — see TiltedColumns.
+            Tilt = TiltedColumns.For(ordered),
+        };
     }
 
     /// <summary>

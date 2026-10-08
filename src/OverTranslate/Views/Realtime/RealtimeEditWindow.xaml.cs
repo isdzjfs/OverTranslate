@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
+using NLog;
 using OverTranslate.Services;
 using OverTranslate.Services.Realtime;
 using Button = System.Windows.Controls.Button;
@@ -16,6 +17,7 @@ using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 using Point = System.Windows.Point;
 using Rect = System.Windows.Rect;
 using Shape = System.Windows.Shapes.Rectangle;
+using Size = System.Windows.Size;
 
 namespace OverTranslate.Views.Realtime;
 
@@ -113,17 +115,58 @@ public partial class RealtimeEditWindow : Window
 
     private const double BaseHintFontSize = 13;
 
+    // The copy's hint as a fraction of the copy's height — see PlaceCopyHint.
+    private const double CopyHintHeightRatio = 0.2;
+
     private static readonly SolidColorBrush FrameStroke = Freeze(Color.FromArgb(0xE6, 0x1E, 0x90, 0xD5));
     private static readonly SolidColorBrush FrameFill = Freeze(Color.FromArgb(0x1C, 0x99, 0xC8, 0xF0));
     private static readonly SolidColorBrush HandleFill = Freeze(Color.FromRgb(0xFF, 0xFF, 0xFF));
     private static readonly SolidColorBrush RemoveForeground = Freeze(Color.FromRgb(0xFF, 0xFF, 0xFF));
 
+    // 對照顯示's copy of a block, and everything that belongs to it — outline, label, ✕, corner
+    // handles, the line back to the block — in amber rather than the block's blue. The two are
+    // different things: the block is the area being read, the copy is where its translation will be
+    // drawn, and in the block's own blue, however faint, the copy was easy to miss and easy to take
+    // for a second block. A colour of its own is found at a glance and says which is which. Amber
+    // because it is far from the blue and holds up over both a bright and a dark scene. The block's
+    // own buttons — remove, and restore on the trays — stay blue: they act on the block.
+    private static readonly SolidColorBrush CopyStroke = Freeze(Color.FromArgb(0xF2, 0xF0, 0xA0, 0x28));
+    private static readonly SolidColorBrush CopyFill = Freeze(Color.FromArgb(0x24, 0xF0, 0xA0, 0x28));
+    // 「譯文顯示位置」 in the middle of the copy: white text with a dark rim round every glyph, which
+    // keeps it legible over a bright scene and a dark one alike.
+    private static readonly SolidColorBrush CopyHintLetters = Freeze(Color.FromArgb(0xE6, 0xFF, 0xFF, 0xFF));
+    private static readonly SolidColorBrush CopyHintRim = Freeze(Color.FromArgb(0xA6, 0x00, 0x00, 0x00));
+    // A thin dark rim either side of the dashes, so the amber line still has an edge over a pale
+    // scene. Two hairlines rather than a shadow, for the reason the outline has none.
+    private static readonly SolidColorBrush CopyRimOuter = Freeze(Color.FromArgb(0x8C, 0x00, 0x00, 0x00));
+    private static readonly SolidColorBrush CopyRimInner = Freeze(Color.FromArgb(0x59, 0x00, 0x00, 0x00));
+    private static readonly SolidColorBrush CopyLabelFill = Freeze(Color.FromArgb(0xE6, 0xF0, 0xA0, 0x28));
+    private static readonly SolidColorBrush CopyLabelForeground = Freeze(Color.FromRgb(0x2A, 0x1A, 0x00));
+    // The copy's ✕: the label's amber, its glyph about 90%, drawn as two strokes heavier than the
+    // label's text. A darker step of the amber was tried and read as too dark.
+    private static readonly SolidColorBrush CopyCloseFill = CopyLabelFill;
+    private static readonly SolidColorBrush CopyCloseForeground = Freeze(Color.FromArgb(0xE6, 0x2A, 0x1A, 0x00));
+
+    // 對照顯示's glyph, the same path as RealtimeControlWindow's RealtimeCompareGlyph resource: the
+    // button that brings one block's copy back wears the bar button's face for that reason. Kept
+    // as a copy here because this layer is built in code and has no reach into that window's
+    // resources; change the two together.
+    private static readonly Geometry CompareGlyph = FreezeGeometry(Geometry.Parse(
+        "M1.841,7.912 L4.256,1.875 L6.671,7.912 M2.704,5.842 L5.809,5.842 M9.863,3.772 L16.762,3.772 " +
+        "M9.863,6.791 L14.175,6.791 M4.256,10.069 L4.256,11.147 M1.237,11.535 L7.275,11.535 " +
+        "M2.316,12.139 C2.876,13.907 4.472,15.287 7.275,16.106 M6.197,12.139 C5.636,13.907 4.041,15.287 1.237,16.106 " +
+        "M9.863,11.794 L16.762,11.794 M9.863,14.812 L14.175,14.812"));
+
     // The mode control floats over whatever is playing underneath, so its own surface has to carry
     // the contrast: a near-opaque dark track, and a hairline along the top edge in place of the
     // light a real material would catch. Anything lighter stops being legible over a bright scene.
     private static readonly SolidColorBrush ModeTrack = Freeze(Color.FromArgb(0xD8, 0x1C, 0x1C, 0x1E));
+    // The restore tray: the block's blue at the trays' opacity.
+    private static readonly SolidColorBrush RestoreFill = Freeze(Color.FromArgb(0xD8, 0x1E, 0x90, 0xD5));
     private static readonly SolidColorBrush ModeTrackEdge = Freeze(Color.FromArgb(0x2E, 0xFF, 0xFF, 0xFF));
     private static readonly SolidColorBrush ModeIdleForeground = Freeze(Color.FromArgb(0x99, 0xFF, 0xFF, 0xFF));
+
+    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
 
     private readonly System.Drawing.Rectangle _physBounds;
     private readonly IReadOnlyList<RealtimeBlockPlacement> _initialBlocks;
@@ -153,6 +196,10 @@ public partial class RealtimeEditWindow : Window
     private double _modeInset = BaseModeInset;
     private double _hintWidth = BaseHintWidth;
 
+    // How wide the copy's hint is per unit of font size — measured once, since the text is fixed for
+    // the layer's lifetime. See PlaceCopyHint.
+    private double _copyHintUnitWidth;
+
     private Point _drawOrigin;
     private Shape? _drawPreview;
 
@@ -170,13 +217,20 @@ public partial class RealtimeEditWindow : Window
     /// <inheritdoc cref="_blockMode"/>
     private RealtimeTextOrientation _textOrientation;
 
+    /// <summary>
+    /// Whether 對照顯示 is on, and with it whether every block shows the copy its translation will be
+    /// drawn in. See <see cref="SetCompareDisplay"/>.
+    /// </summary>
+    private bool _compareDisplay;
+
     public RealtimeEditWindow(
         System.Drawing.Rectangle physBounds,
         IReadOnlyList<RealtimeBlockPlacement> initialBlocks,
         int maxBlocks,
         bool guidanceExpanded,
         RealtimeBlockMode blockMode,
-        RealtimeTextOrientation textOrientation)
+        RealtimeTextOrientation textOrientation,
+        bool compareDisplay = false)
     {
         InitializeComponent();
 
@@ -186,6 +240,7 @@ public partial class RealtimeEditWindow : Window
         _guidanceExpanded = guidanceExpanded;
         _blockMode = blockMode;
         _textOrientation = textOrientation;
+        _compareDisplay = compareDisplay;
 
         Loaded += (_, _) =>
         {
@@ -202,7 +257,12 @@ public partial class RealtimeEditWindow : Window
             foreach (var block in _initialBlocks)
                 AddBlock(
                     ToCanvas(block.Bounds), block.Mode, block.Orientation, _guidanceExpanded,
-                    notify: false);
+                    notify: false,
+                    block.CompareOffset is { } offset
+                        ? new Vector(offset.X / _dpiX, offset.Y / _dpiY)
+                        : null,
+                    block.CompareScale,
+                    block.CompareHidden);
 
             RaiseBlocksChanged();
         };
@@ -240,6 +300,33 @@ public partial class RealtimeEditWindow : Window
 
         BlockCanvas.Cursor = enabled ? Cursors.Cross : Cursors.Arrow;
         WindowStyles.SetClickThrough(this, !enabled);
+
+        var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        Log.Debug("Realtime edit layer framing {State} exstyle={ExStyle:X8} visible={Visible}",
+            enabled ? "on" : "off", WindowZOrderDiagnostics.ExStyle(hwnd), WindowZOrderDiagnostics.IsVisible(hwnd));
+    }
+
+    /// <summary>
+    /// Shows or hides the copy beside every block that 對照顯示 draws the translation in.
+    /// </summary>
+    /// <remarks>
+    /// <para>The copies are on screen while framing because where the translation will appear is a
+    /// framing question: a copy above a subtitle can land on the HUD, a copy left of a column on the
+    /// next balloon, and the user has to see that before starting to fix it. Each one can be dragged,
+    /// and shrunk in proportion from its corners — it is the block's own shape by definition, see
+    /// <see cref="RealtimeComparePlacement"/> — and has no remove button and no trays, because
+    /// everything about it except its position and size belongs to its block.</para>
+    ///
+    /// <para>Hidden rather than removed when the switch goes off, and the offsets and scales kept:
+    /// switching it back on should bring every copy back where, and as large as, the user had
+    /// it.</para>
+    /// </remarks>
+    public void SetCompareDisplay(bool enabled)
+    {
+        if (_compareDisplay == enabled) return;
+
+        _compareDisplay = enabled;
+        ApplyAll();
     }
 
     /// <summary>Raised whenever a block is added, removed, moved or resized.</summary>
@@ -271,7 +358,8 @@ public partial class RealtimeEditWindow : Window
     /// <summary>The current blocks in physical screen pixels, ready to be watched.</summary>
     public IReadOnlyList<RealtimeBlockPlacement> GetPhysicalBlocks() =>
         [.. _blocks.Select(block => new RealtimeBlockPlacement(
-            ToPhysical(block.Bounds), block.ModeControl.Value, block.ModeControl.TextOrientation))];
+            ToPhysical(block.Bounds), block.ModeControl.Value, block.ModeControl.TextOrientation,
+            ToPhysical(block.CompareOffset), block.CompareScale, block.CompareHidden))];
 
     protected override void OnSourceInitialized(EventArgs e)
     {
@@ -413,21 +501,51 @@ public partial class RealtimeEditWindow : Window
         RealtimeBlockMode mode,
         RealtimeTextOrientation orientation,
         bool guidanceExpanded,
-        bool notify)
+        bool notify,
+        Vector? compareOffset = null,
+        double compareScale = 1.0,
+        bool compareHidden = false)
     {
         var visual = new BlockVisual(
             bounds, mode, orientation, guidanceExpanded, _handleSize, _removeSize,
             _modeSegmentWidth, _directionSegmentWidth, _modeHeight, _modeInset, _hintWidth,
-            _removeGap, _uiScale);
+            _removeGap, _uiScale)
+        {
+            CompareOffset = compareOffset,
+            CompareScale = compareScale,
+            CompareHidden = compareHidden,
+        };
 
         visual.Body.DragDelta += (_, e) => Move(visual, e.HorizontalChange, e.VerticalChange);
+        visual.Copy.DragDelta += (_, e) => MoveCopy(visual, e.HorizontalChange, e.VerticalChange);
+        visual.CopyGrip.DragDelta += (_, e) => MoveCopy(visual, e.HorizontalChange, e.VerticalChange);
+        visual.CopyGrip.PreviewMouseLeftButtonDown += (_, e) =>
+        {
+            if (e.ClickCount != 2) return;
+
+            // Handled, so the second press does not also start a drag of the copy it just moved.
+            e.Handled = true;
+            ResetCopy(visual);
+        };
         visual.Remove.Click += (_, e) =>
         {
             e.Handled = true;   // must not fall through and start drawing a new block underneath
             RemoveBlock(visual);
         };
+        visual.CopyClose.Click += (_, e) =>
+        {
+            e.Handled = true;
+            SetCompareHidden(visual, true);
+        };
+        visual.Restore.Click += (_, e) =>
+        {
+            e.Handled = true;
+            SetCompareHidden(visual, false);
+        };
         visual.ModeControl.SelectionChanged += (_, tray) =>
         {
+            // The direction decides which side an automatic copy goes, so it may have just moved.
+            if (tray == ModeSegments.BlockTray.Direction) ApplyAll();
             RaiseBlocksChanged();
 
             // The tray last pressed is the one that counts, on whichever block it was pressed — and
@@ -453,6 +571,7 @@ public partial class RealtimeEditWindow : Window
         {
             int index = corner;
             visual.Corners[index].DragDelta += (_, e) => Resize(visual, index, e.HorizontalChange, e.VerticalChange);
+            visual.CopyCorners[index].DragDelta += (_, e) => ScaleCopy(visual, index, e.HorizontalChange, e.VerticalChange);
         }
 
         _blocks.Add(visual);
@@ -469,14 +588,37 @@ public partial class RealtimeEditWindow : Window
         RaiseBlocksChanged();
     }
 
-    // Frames first, then every handle: a handle sitting on the edge between two overlapping blocks
-    // has to stay grabbable whichever block was drawn last.
+    // Three layers, bottom to top, and what is drawn on top is also what a click lands on:
+    //
+    //   1. the block frames, which are also how a block is dragged;
+    //   2. the 對照顯示 copies, with their lines, labels, corner handles and ✕;
+    //   3. every block's handles, remove buttons, and trays (the restore button is one of the trays).
+    //
+    // A copy over its block is there because the user put it there, so a press on the overlap takes
+    // the copy; the block is dragged by whatever of it is still showing. The controls that only the
+    // block has — resizing, removing, its trays — stay on top of everything, so a block buried under
+    // a copy can still be resized or removed directly. And the handles of all blocks go above all
+    // frames, so a handle on the edge between two overlapping blocks stays grabbable whichever block
+    // was drawn last. A copy's own corner handles sit under every block's for the same reason: where
+    // a copy's corner lands on its block's, the press resizes the block, and the copy is still
+    // reachable from its other three.
     private void RebuildCanvas()
     {
         BlockCanvas.Children.Clear();
 
         foreach (var block in _blocks)
             BlockCanvas.Children.Add(block.Body);
+
+        foreach (var block in _blocks)
+        {
+            BlockCanvas.Children.Add(block.Link);
+            BlockCanvas.Children.Add(block.Copy);
+            BlockCanvas.Children.Add(block.CopyHint);
+            BlockCanvas.Children.Add(block.CopyGrip);
+            foreach (var corner in block.CopyCorners)
+                BlockCanvas.Children.Add(corner);
+            BlockCanvas.Children.Add(block.CopyClose);
+        }
 
         foreach (var block in _blocks)
         {
@@ -498,8 +640,173 @@ public partial class RealtimeEditWindow : Window
         double x = Math.Clamp(bounds.X + dx, 0, Math.Max(0, BlockCanvas.ActualWidth - bounds.Width));
         double y = Math.Clamp(bounds.Y + dy, 0, Math.Max(0, BlockCanvas.ActualHeight - bounds.Height));
         visual.Bounds = new Rect(x, y, bounds.Width, bounds.Height);
-        Apply(visual);
+        ApplyChanged(visual);
         RaiseBlocksChanged();
+    }
+
+    /// <summary>
+    /// Drags a block's 對照顯示 copy, anywhere on the screen, blocks included — see
+    /// <see cref="RealtimeComparePlacement.Drag"/>.
+    /// </summary>
+    /// <remarks>
+    /// The first drag is what turns a copy from automatic into the user's: from then on moving its
+    /// block carries the copy along at the same offset, resizing it keeps the copy on the same side
+    /// at the same gap (see <see cref="Resize"/>), and only a double-click on its label hands it back
+    /// to the automatic placement.
+    /// </remarks>
+    private void MoveCopy(BlockVisual visual, double dx, double dy)
+    {
+        if (CopyBounds(visual) is not { } current) return;
+
+        var moved = RealtimeComparePlacement.Drag(
+            current, new Vector(dx, dy), new Rect(0, 0, BlockCanvas.ActualWidth, BlockCanvas.ActualHeight));
+
+        visual.CompareOffset = moved.TopLeft - visual.Bounds.TopLeft;
+        ApplyChanged(visual);
+        RaiseBlocksChanged();
+    }
+
+    /// <summary>
+    /// Shrinks or grows a block's 對照顯示 copy from one of its corners, in proportion — see
+    /// <see cref="RealtimeComparePlacement.ScaleFromCorner"/>.
+    /// </summary>
+    /// <remarks>
+    /// Counts as a drag: the copy is the user's from then on, at the offset this leaves it at, the
+    /// same as if they had moved it there. An automatic copy that changed size would otherwise have
+    /// the automatic placement put it somewhere new on every step of the pull.
+    /// </remarks>
+    private void ScaleCopy(BlockVisual visual, int corner, double dx, double dy)
+    {
+        if (CopyBounds(visual) is not { } current) return;
+
+        var (box, scale) = RealtimeComparePlacement.ScaleFromCorner(
+            current, visual.Bounds.Size, corner, new Vector(dx, dy),
+            new Rect(0, 0, BlockCanvas.ActualWidth, BlockCanvas.ActualHeight));
+
+        visual.CompareOffset = box.TopLeft - visual.Bounds.TopLeft;
+        visual.CompareScale = scale;
+        ApplyChanged(visual);
+        RaiseBlocksChanged();
+    }
+
+    /// <summary>
+    /// Hands a copy back to the automatic placement at its block's full size — a double-click on its
+    /// label.
+    /// </summary>
+    /// <remarks>
+    /// The way back from a drag or a resize the user regrets, and the only one: there is no other
+    /// control on a copy, and dragging it by hand to exactly where the program would have put it is
+    /// not a thing anyone can do. Both go back together, because a copy is either the program's or
+    /// the user's — and an automatic one is the block's size. Its block's other copies may move in
+    /// answer, as they do whenever one copy moves, because the automatic ones steer clear of each
+    /// other.
+    /// </remarks>
+    private void ResetCopy(BlockVisual visual)
+    {
+        if (visual.CompareOffset is null && visual.CompareScale == 1.0) return;
+
+        visual.CompareOffset = null;
+        visual.CompareScale = 1.0;
+        ApplyChanged(visual);
+        RaiseBlocksChanged();
+    }
+
+    /// <summary>
+    /// Turns one block's copy off — the ✕ at its corner — or back on — the button under its remove
+    /// button.
+    /// </summary>
+    /// <remarks>
+    /// Turning it off lets go of it as well, the same as a double-click on its label: where it was
+    /// dragged and how far it was shrunk are dropped, so bringing it back gives the automatic
+    /// placement at the block's size — a fresh copy, not the one that was dismissed. Every block is
+    /// laid out again rather than this one: a copy turned off frees the room it took, and an
+    /// automatic copy elsewhere may now go there — or, coming back, have to make room.
+    /// </remarks>
+    private void SetCompareHidden(BlockVisual visual, bool hidden)
+    {
+        if (visual.CompareHidden == hidden) return;
+
+        if (hidden)
+        {
+            visual.CompareOffset = null;
+            visual.CompareScale = 1.0;
+        }
+
+        visual.CompareHidden = hidden;
+        ApplyAll();
+        RaiseBlocksChanged();
+    }
+
+    /// <summary>
+    /// Where a block's 對照顯示 copy sits on the canvas, or null while the switch is off or the
+    /// user has turned this block's copy off.
+    /// </summary>
+    /// <remarks>
+    /// Automatic copies are placed by the same function, on the same physical rectangles, that the
+    /// running overlays will be — so what the user sees here is where the translation will be. A copy
+    /// the user has dragged is placed straight from its offset in this window's own units, kept on
+    /// the screen as the running side keeps it; going through whole pixels on every mouse move would
+    /// make a slow drag step.
+    /// </remarks>
+    private Rect? CopyBounds(BlockVisual visual)
+    {
+        if (!_compareDisplay || visual.CompareHidden) return null;
+
+        var screen = new Rect(0, 0, BlockCanvas.ActualWidth, BlockCanvas.ActualHeight);
+        if (visual.CompareOffset is { } offset)
+        {
+            var box = new Rect(
+                visual.Bounds.TopLeft + offset,
+                new Size(visual.Bounds.Width * visual.CompareScale, visual.Bounds.Height * visual.CompareScale));
+            return new Rect(
+                Math.Clamp(box.X, 0, Math.Max(0, screen.Width - box.Width)),
+                Math.Clamp(box.Y, 0, Math.Max(0, screen.Height - box.Height)),
+                box.Width, box.Height);
+        }
+
+        var slots = _blocks
+            .Select(block => new RealtimeCompareSlot(
+                ToPhysical(block.Bounds), block.ModeControl.TextOrientation, ToPhysical(block.CompareOffset),
+                block.CompareScale, block.CompareHidden))
+            .ToList();
+        int index = _blocks.IndexOf(visual);
+        var placed = RealtimeComparePlacement.Displace(
+            slots[index].Bounds, RealtimeComparePlacement.Place(slots, _physBounds)[index], slots[index].Scale);
+        return ToCanvas(placed);
+    }
+
+    private void ApplyAll()
+    {
+        foreach (var block in _blocks)
+            Apply(block);
+    }
+
+    /// <summary>
+    /// Re-lays out the block being dragged, and any other block only if its automatic copy has
+    /// actually moved because of it.
+    /// </summary>
+    /// <remarks>
+    /// <para>Runs on every mouse move of a drag, so it lays out only what the move can have changed.
+    /// That keeps the layout work small; it is not what a drag costs the GPU. Measured, dragging one
+    /// block cost the same as dragging three, and laying out every block on every move against only
+    /// the changed ones made under half a point of difference: the area that changes is not the
+    /// cost. What is, is that this is a full-screen layered window, handed to the system whole on
+    /// every frame it changes, and that the frame's shadow is blurred again on every one of those
+    /// frames.</para>
+    ///
+    /// <para>An automatic copy can move when another block moves, because it steers clear of the
+    /// blocks and of the other copies, so those are placed again and compared with where they are
+    /// shown. A copy the user has dragged follows its own block alone and is never affected.</para>
+    /// </remarks>
+    private void ApplyChanged(BlockVisual visual)
+    {
+        Apply(visual);
+
+        foreach (var block in _blocks)
+        {
+            if (ReferenceEquals(block, visual) || block.CompareOffset is not null) continue;
+            if (CopyBounds(block) != block.ShownCopy) Apply(block);
+        }
     }
 
     // Corner order: 0 = top-left, 1 = top-right, 2 = bottom-left, 3 = bottom-right.
@@ -520,8 +827,21 @@ public partial class RealtimeEditWindow : Window
         if (movesTop) top = Math.Clamp(top + dy, 0, bottom - _minBlockHeight);
         else bottom = Math.Clamp(bottom + dy, top + _minBlockHeight, BlockCanvas.ActualHeight);
 
-        visual.Bounds = new Rect(left, top, right - left, bottom - top);
-        Apply(visual);
+        var resized = new Rect(left, top, right - left, bottom - top);
+
+        // A copy the user placed keeps its relation to the block rather than its offset from the
+        // corner — see RealtimeComparePlacement.Resized. An automatic one is simply placed again.
+        if (visual.CompareOffset is { } offset)
+        {
+            double scale = visual.CompareScale;
+            var kept = RealtimeComparePlacement.Resized(
+                bounds, new Rect(bounds.TopLeft + offset, new Size(bounds.Width * scale, bounds.Height * scale)),
+                resized, new Rect(0, 0, BlockCanvas.ActualWidth, BlockCanvas.ActualHeight), scale);
+            visual.CompareOffset = kept.TopLeft - resized.TopLeft;
+        }
+
+        visual.Bounds = resized;
+        ApplyChanged(visual);
         RaiseBlocksChanged();
     }
 
@@ -539,6 +859,10 @@ public partial class RealtimeEditWindow : Window
         PlaceHandle(visual.Corners[2], bounds.Left, bounds.Bottom);
         PlaceHandle(visual.Corners[3], bounds.Right, bounds.Bottom);
 
+        var copy = CopyBounds(visual);
+        PlaceCopy(visual, copy);
+        PlaceCopyHint(visual, copy);
+
         // Outside the top-right corner by preference, so it never covers the content being framed;
         // tucked inside when the block is against the screen edge and there is no room out there.
         double removeLeft = bounds.Right + _removeGap;
@@ -547,28 +871,18 @@ public partial class RealtimeEditWindow : Window
         Canvas.SetLeft(visual.Remove, removeLeft);
         Canvas.SetTop(visual.Remove, Math.Max(0, bounds.Top));
 
-        // Above the block's top-left corner: it reads as a label on the block without covering the
-        // content being framed, and it is the far corner from the remove button — the two are one
-        // click apart otherwise, and one of them destroys the block. Tucked inside the top edge when
-        // the block is against the top of the screen, which is where a subtitle strip often is.
-        // Above the block by preference, below it when there is no room up there, and only inside it
-        // as a last resort. The order matters more than it did when this was a single chip: the
-        // guidance makes this tall enough that putting it inside covers a good part of what the user
-        // is trying to frame, so anywhere outside the block beats anywhere inside it.
-        var mode = visual.ModeControl;
-        double modeTop = bounds.Top - mode.TotalHeight - _removeGap;
-        if (modeTop < 0)
-        {
-            double below = bounds.Bottom + _removeGap;
-            modeTop = below + mode.TotalHeight <= BlockCanvas.ActualHeight
-                ? below
-                : Math.Min(bounds.Top + _removeGap, BlockCanvas.ActualHeight - mode.TotalHeight);
-        }
+        // At the end of the trays, shown only while there is a copy to bring back. Set before the
+        // trays are placed, because it changes how wide they are.
+        visual.ModeControl.SetRestoreShown(_compareDisplay && visual.CompareHidden);
 
         // Kept whole rather than allowed to run off the side: this is the control that says what the
         // block is and how to draw it, and half of it off-screen says neither.
+        var mode = visual.ModeControl;
         double modeLeft = Math.Clamp(
             bounds.Left, 0, Math.Max(0, BlockCanvas.ActualWidth - mode.TotalWidth));
+        double modeTop = ModeControlTop(
+            bounds, new Size(mode.TotalWidth, mode.TotalHeight), modeLeft, copy,
+            BlockCanvas.ActualHeight, _removeGap);
 
         // Snapped to whole device pixels, because this one carries text. The block itself is placed
         // wherever the pointer left it and is right to be; a plate of 13-point CJK starting half way
@@ -606,6 +920,182 @@ public partial class RealtimeEditWindow : Window
     private static double SnapToPixels(double position, double dpi) =>
         dpi > 0 ? Math.Round(position * dpi) / dpi : position;
 
+    /// <summary>
+    /// Where a block's trays go vertically: above the block, or tucked inside its top edge.
+    /// </summary>
+    /// <remarks>
+    /// <para>Above the block's top-left corner by preference: it reads as a label on the block
+    /// without covering the content being framed, and it is the far corner from the remove button —
+    /// the two are one click apart otherwise, and one of them destroys the block.</para>
+    ///
+    /// <para>Inside the top edge otherwise, never below the block. Below reads as belonging to
+    /// whatever is under the block, and below is also where a copy often sits. Inside is chosen when
+    /// there is no room above — the block is against the top of the screen, which is where a
+    /// subtitle strip often is — and when the trays up there would overlap this block's own 對照顯示
+    /// copy. The copy shows where the translation will be drawn while running, so it is not moved
+    /// for the trays; the trays give way instead, and stay on the block rather than stepping off to
+    /// somewhere else. Only the block's own copy counts, not other blocks', so where the trays end
+    /// up depends on the one block and its copy and nothing else.</para>
+    ///
+    /// <para>Placed by the block and its copy, never by a copy alone. They used to step round a copy
+    /// sitting above or below, and that made the trays follow the copy rather than the block: drag a
+    /// copy well clear and its block's trays went with it, out of reach of the block they set.
+    /// Tucked inside with the guidance open, they cover part of what the user is framing; that is
+    /// the accepted cost, and the guidance folds away.</para>
+    /// </remarks>
+    internal static double ModeControlTop(
+        Rect block, Size control, double controlLeft, Rect? copy, double screenHeight, double gap)
+    {
+        double above = block.Top - control.Height - gap;
+        if (above >= 0)
+        {
+            var tray = new Rect(controlLeft, above, control.Width, control.Height);
+            if (copy is not { } box || !Overlaps(tray, box)) return above;
+        }
+
+        return Math.Max(0, Math.Min(block.Top + gap, screenHeight - control.Height));
+
+        // Strictly: Rect.IntersectsWith counts two rectangles that only touch.
+        static bool Overlaps(Rect a, Rect b) =>
+            a.Left < b.Right && b.Left < a.Right && a.Top < b.Bottom && b.Top < a.Bottom;
+    }
+
+    /// <summary>
+    /// Sizes the hint to a block's copy and centres it there; takes it off the canvas with the copy.
+    /// </summary>
+    /// <remarks>
+    /// <para>Always in the middle and always shown, at a size taken from the copy: a fifth of its
+    /// height, or whatever keeps the line within 80% of its width if that is less. So it grows and
+    /// shrinks with the copy as either the copy or its block is resized — never hidden, never moved
+    /// off centre, and with no smallest size, because a copy that small is one the user pulled down
+    /// on purpose. A fifth because over a subtitle-sized block that is clearly larger than the
+    /// layer's interface text, yet small enough to leave the corners to the label and handles.</para>
+    ///
+    /// <para>The outline is rebuilt only when that size changes, on half-unit steps; moving the
+    /// copy only moves it.</para>
+    /// </remarks>
+    private void PlaceCopyHint(BlockVisual visual, Rect? copy)
+    {
+        var hint = visual.CopyHint;
+        if (copy is not { } box)
+        {
+            hint.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (_copyHintUnitWidth <= 0)
+            _copyHintUnitWidth = CopyHintText(1.0).WidthIncludingTrailingWhitespace;
+
+        double size = Math.Min(box.Height * CopyHintHeightRatio, box.Width * 0.8 / _copyHintUnitWidth);
+        size = Math.Max(0.5, Math.Round(size * 2) / 2);
+
+        if (size != visual.CopyHintSize)
+        {
+            var glyphs = CopyHintText(size).BuildGeometry(new Point(0, 0));
+            glyphs.Freeze();
+            visual.CopyHintFill.Data = glyphs;
+            visual.CopyHintOutline.Data = glyphs;
+            // Twice the rim wanted: the stroke is centred on the glyph's edge and the fill drawn over
+            // it covers the inner half.
+            visual.CopyHintOutline.StrokeThickness = Math.Max(1.5 * _uiScale, size * 0.16);
+            visual.CopyHintSize = size;
+        }
+
+        // By the ink, not the line box, so the text sits in the true middle whatever the font's
+        // ascent and descent.
+        var ink = visual.CopyHintFill.Data.Bounds;
+        Canvas.SetLeft(hint, box.X + box.Width / 2 - (ink.X + ink.Width / 2));
+        Canvas.SetTop(hint, box.Y + box.Height / 2 - (ink.Y + ink.Height / 2));
+        hint.Visibility = Visibility.Visible;
+    }
+
+    private FormattedText CopyHintText(double size) => new(
+        LocalizationService.Get("S.Realtime.CompareCopyCenter"),
+        System.Globalization.CultureInfo.CurrentUICulture,
+        System.Windows.FlowDirection.LeftToRight,
+        new Typeface(System.Windows.SystemFonts.MessageFontFamily, FontStyles.Normal, FontWeights.Bold, FontStretches.Normal),
+        size,
+        System.Windows.Media.Brushes.White,
+        _dpiY);
+
+    /// <summary>
+    /// Puts a block's 對照顯示 copy where <see cref="CopyBounds"/> says, with a line back to the block
+    /// — or takes both off the canvas while the switch is off.
+    /// </summary>
+    /// <remarks>
+    /// The line is what says which block a copy belongs to once there are three of each on screen.
+    /// It runs between the facing edges rather than the centres, so it never crosses the content the
+    /// block is framing, and it goes away when the two touch or overlap: there is then nothing to
+    /// connect, and a line drawn inside them would be one more stroke over the picture.
+    /// </remarks>
+    private void PlaceCopy(BlockVisual visual, Rect? copy)
+    {
+        visual.ShownCopy = copy;
+        if (copy is not { } box)
+        {
+            visual.Copy.Visibility = Visibility.Collapsed;
+            visual.CopyGrip.Visibility = Visibility.Collapsed;
+            visual.CopyClose.Visibility = Visibility.Collapsed;
+            visual.Link.Visibility = Visibility.Collapsed;
+            foreach (var corner in visual.CopyCorners)
+                corner.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        visual.Copy.Visibility = Visibility.Visible;
+        visual.Copy.Width = box.Width;
+        visual.Copy.Height = box.Height;
+        Canvas.SetLeft(visual.Copy, box.X);
+        Canvas.SetTop(visual.Copy, box.Y);
+
+        visual.CopyGrip.Visibility = Visibility.Visible;
+        Canvas.SetLeft(visual.CopyGrip, box.X + visual.GripInset);
+        Canvas.SetTop(visual.CopyGrip, box.Y + visual.GripInset);
+
+        // Where the block's remove button goes on the block, for the same reasons.
+        double closeLeft = box.Right + _removeGap;
+        if (closeLeft + _removeSize > BlockCanvas.ActualWidth)
+            closeLeft = box.Right - _removeSize - _removeGap;
+        visual.CopyClose.Visibility = Visibility.Visible;
+        Canvas.SetLeft(visual.CopyClose, closeLeft);
+        Canvas.SetTop(visual.CopyClose, Math.Max(0, box.Top));
+
+        for (int i = 0; i < visual.CopyCorners.Length; i++)
+        {
+            var corner = visual.CopyCorners[i];
+            double half = corner.Width / 2;
+            corner.Visibility = Visibility.Visible;
+            Canvas.SetLeft(corner, (i is 0 or 2 ? box.Left : box.Right) - half);
+            Canvas.SetTop(corner, (i is 0 or 1 ? box.Top : box.Bottom) - half);
+        }
+
+        var bounds = visual.Bounds;
+        var from = new Point(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2);
+        var to = new Point(box.X + box.Width / 2, box.Y + box.Height / 2);
+        var start = EdgeToward(bounds, from, to);
+        var end = EdgeToward(box, to, from);
+
+        // Pointing the same way as centre to centre means the two edge points are in order, i.e. the
+        // rectangles are apart; reversed or coincident means they touch or overlap.
+        bool apart = (end - start) * (to - from) > 0.5;
+        visual.Link.Visibility = apart ? Visibility.Visible : Visibility.Collapsed;
+        visual.Link.X1 = start.X;
+        visual.Link.Y1 = start.Y;
+        visual.Link.X2 = end.X;
+        visual.Link.Y2 = end.Y;
+    }
+
+    /// <summary>Where a line from a rectangle's centre toward a point leaves the rectangle.</summary>
+    private static Point EdgeToward(Rect rect, Point centre, Point target)
+    {
+        var direction = target - centre;
+        if (direction.Length < 0.001) return centre;
+
+        double scaleX = Math.Abs(direction.X) > 0.001 ? rect.Width / 2 / Math.Abs(direction.X) : double.PositiveInfinity;
+        double scaleY = Math.Abs(direction.Y) > 0.001 ? rect.Height / 2 / Math.Abs(direction.Y) : double.PositiveInfinity;
+        return centre + direction * Math.Min(scaleX, scaleY);
+    }
+
     private void PlaceHandle(Thumb handle, double centreX, double centreY)
     {
         Canvas.SetLeft(handle, centreX - _handleSize / 2);
@@ -628,11 +1118,22 @@ public partial class RealtimeEditWindow : Window
         Math.Max(1, (int)Math.Round(canvas.Width * _dpiX)),
         Math.Max(1, (int)Math.Round(canvas.Height * _dpiY)));
 
+    // An offset, not a position: no screen origin to add.
+    private System.Drawing.Point? ToPhysical(Vector? offset) => offset is { } value
+        ? new System.Drawing.Point((int)Math.Round(value.X * _dpiX), (int)Math.Round(value.Y * _dpiY))
+        : null;
+
     private static SolidColorBrush Freeze(Color color)
     {
         var brush = new SolidColorBrush(color);
         brush.Freeze();
         return brush;
+    }
+
+    private static Geometry FreezeGeometry(Geometry geometry)
+    {
+        geometry.Freeze();
+        return geometry;
     }
 
     /// <summary>
@@ -688,12 +1189,148 @@ public partial class RealtimeEditWindow : Window
             ModeControl = new ModeSegments(
                 mode, orientation, guidanceExpanded, modeHeight, modeSegmentWidth,
                 directionSegmentWidth, modeInset, hintWidth, gap, uiScale);
+
+            Copy = new Thumb
+            {
+                Cursor = Cursors.SizeAll,
+                Template = BuildCopyTemplate(uiScale),
+                ToolTip = LocalizationService.Get("S.Realtime.CompareCopyHint"),
+                Visibility = Visibility.Collapsed,
+            };
+
+            GripInset = 4 * uiScale;
+            CopyGrip = new Thumb
+            {
+                Cursor = Cursors.SizeAll,
+                Template = BuildGripTemplate(uiScale),
+                ToolTip = LocalizationService.Get("S.Realtime.CompareCopyHint"),
+                Visibility = Visibility.Collapsed,
+            };
+
+            // The copy's own remove button, in the same place and of the same size as the block's,
+            // so the two are found the same way.
+            CopyClose = new Button
+            {
+                Width = removeSize,
+                Height = removeSize,
+                Cursor = Cursors.Hand,
+                ToolTip = LocalizationService.Get("S.Realtime.CompareHideBlock"),
+                Template = BuildCopyCloseTemplate(removeSize, uiScale),
+                Visibility = Visibility.Collapsed,
+            };
+
+            // A little smaller than the block's, and filled in the label's colour rather than white:
+            // the block's handles are the primary ones, and these have to read as the copy's at a
+            // glance where the two sit close together.
+            double copyHandleSize = handleSize * 10 / 12;
+            CopyCorners = [.. CornerCursors.Select(cursor => new Thumb
+            {
+                Width = copyHandleSize,
+                Height = copyHandleSize,
+                Cursor = cursor,
+                Template = BuildCopyHandleTemplate(copyHandleSize, uiScale),
+                Visibility = Visibility.Collapsed,
+            })];
+
+            // The rim and the letters as two paths on one geometry, rim underneath: an outline
+            // drawn without an Effect, which would be re-rendered on every frame of a drag. Neither
+            // takes the mouse, so a press on the hint drags the copy.
+            CopyHintOutline = new System.Windows.Shapes.Path
+            {
+                Stroke = CopyHintRim,
+                StrokeLineJoin = PenLineJoin.Round,
+            };
+            CopyHintFill = new System.Windows.Shapes.Path { Fill = CopyHintLetters };
+            CopyHint = new Canvas { IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+            CopyHint.Children.Add(CopyHintOutline);
+            CopyHint.Children.Add(CopyHintFill);
+
+            Link = new System.Windows.Shapes.Line
+            {
+                Stroke = CopyStroke,
+                StrokeThickness = 1.5 * uiScale,
+                IsHitTestVisible = false,
+                Visibility = Visibility.Collapsed,
+            };
         }
 
         public Rect Bounds { get; set; }
         public Thumb Body { get; }
         public Thumb[] Corners { get; }
         public Button Remove { get; }
+
+        /// <summary>
+        /// Where 對照顯示 draws this block's translation, as an offset from <see cref="Bounds"/> in
+        /// canvas units — null until the user drags <see cref="Copy"/>, which means "placed
+        /// automatically". See <see cref="RealtimeBlockPlacement.CompareOffset"/>.
+        /// </summary>
+        public Vector? CompareOffset { get; set; }
+
+        /// <summary>
+        /// How large the copy is, as a fraction of <see cref="Bounds"/> — 1.0 until the user pulls
+        /// one of <see cref="CopyCorners"/>. See <see cref="RealtimeBlockPlacement.CompareScale"/>.
+        /// </summary>
+        public double CompareScale { get; set; } = 1.0;
+
+        /// <summary>
+        /// This block's 對照顯示 copy: the block's shape, at <see cref="CompareScale"/> of its size,
+        /// collapsed while the switch is off.
+        /// </summary>
+        public Thumb Copy { get; }
+
+        /// <summary>The copy's corner handles, in the same order as <see cref="Corners"/>.</summary>
+        public Thumb[] CopyCorners { get; }
+
+        /// <summary>
+        /// The copy's label, which is also its handle: it drags the copy, and a double-click on it
+        /// puts the copy back where the automatic placement would. A separate element from the
+        /// outline only so the double-click has something of its own to land on.
+        /// </summary>
+        public Thumb CopyGrip { get; }
+
+        /// <summary>
+        /// The ✕ outside the copy's top-right corner: turns this block's copy off and leaves the
+        /// others alone. See <see cref="CompareHidden"/>.
+        /// </summary>
+        public Button CopyClose { get; }
+
+        /// <summary>
+        /// Whether the user has turned this block's copy off — see
+        /// <see cref="RealtimeBlockPlacement.CompareHidden"/>.
+        /// </summary>
+        public bool CompareHidden { get; set; }
+
+        /// <summary>
+        /// Brings a turned-off copy back. One of the trays — see <see cref="ModeSegments.Restore"/>.
+        /// </summary>
+        public Button Restore => ModeControl.Restore;
+
+        /// <summary>
+        /// 「譯文顯示位置」 in the middle of the copy, sized to it — see
+        /// <see cref="RealtimeEditWindow.PlaceCopyHint"/>.
+        /// </summary>
+        public Canvas CopyHint { get; }
+
+        /// <summary>The hint's letters.</summary>
+        public System.Windows.Shapes.Path CopyHintFill { get; }
+
+        /// <summary>The dark rim under <see cref="CopyHintFill"/>.</summary>
+        public System.Windows.Shapes.Path CopyHintOutline { get; }
+
+        /// <summary>The font size the hint's outline was last built at, or 0 before the first.</summary>
+        public double CopyHintSize { get; set; }
+
+        /// <summary>How far the label sits in from the copy's top-left corner.</summary>
+        public double GripInset { get; }
+
+        /// <summary>
+        /// Where <see cref="Copy"/> was last put, or null while it is hidden — what a drag elsewhere
+        /// compares against to tell whether this block needs laying out again.
+        /// </summary>
+        public Rect? ShownCopy { get; set; }
+
+        /// <summary>The line from the block to its copy.</summary>
+        public System.Windows.Shapes.Line Link { get; }
 
         /// <summary>What the user says this block holds — see <see cref="RealtimeBlockMode"/>.</summary>
         public ModeSegments ModeControl { get; }
@@ -714,12 +1351,120 @@ public partial class RealtimeEditWindow : Window
             return new ControlTemplate(typeof(Thumb)) { VisualTree = frame };
         }
 
+        /// <summary>
+        /// A dashed amber outline. The label in its corner and the hint in its middle are separate
+        /// elements — see <see cref="BuildGripTemplate"/> — because the label has to be drawn above
+        /// the blocks while the outline is drawn below them, and the hint is resized with the copy.
+        /// </summary>
+        private static ControlTemplate BuildCopyTemplate(double uiScale)
+        {
+            var outline = new FrameworkElementFactory(typeof(Shape));
+            outline.SetValue(System.Windows.Shapes.Shape.StrokeProperty, CopyStroke);
+            outline.SetValue(System.Windows.Shapes.Shape.StrokeThicknessProperty, 2 * uiScale);
+            outline.SetValue(System.Windows.Shapes.Shape.StrokeDashArrayProperty, new DoubleCollection([4, 3]));
+            outline.SetValue(System.Windows.Shapes.Shape.FillProperty, CopyFill);
+            outline.SetValue(Shape.RadiusXProperty, 3 * uiScale);
+            outline.SetValue(Shape.RadiusYProperty, 3 * uiScale);
+
+            // The rim: a hairline just outside the dashes and a fainter one just inside. A shape's
+            // stroke is drawn inside its bounds, so the outer one sits on a box a pixel larger and
+            // the inner one on a box inset by the width of the dashes.
+            var outer = new FrameworkElementFactory(typeof(Shape));
+            outer.SetValue(System.Windows.Shapes.Shape.StrokeProperty, CopyRimOuter);
+            outer.SetValue(System.Windows.Shapes.Shape.StrokeThicknessProperty, 1 * uiScale);
+            outer.SetValue(FrameworkElement.MarginProperty, new Thickness(-1 * uiScale));
+            outer.SetValue(Shape.RadiusXProperty, 4 * uiScale);
+            outer.SetValue(Shape.RadiusYProperty, 4 * uiScale);
+
+            var inner = new FrameworkElementFactory(typeof(Shape));
+            inner.SetValue(System.Windows.Shapes.Shape.StrokeProperty, CopyRimInner);
+            inner.SetValue(System.Windows.Shapes.Shape.StrokeThicknessProperty, 1 * uiScale);
+            inner.SetValue(FrameworkElement.MarginProperty, new Thickness(2 * uiScale));
+            inner.SetValue(Shape.RadiusXProperty, 1 * uiScale);
+            inner.SetValue(Shape.RadiusYProperty, 1 * uiScale);
+
+            var layers = new FrameworkElementFactory(typeof(Grid));
+            layers.AppendChild(outer);
+            layers.AppendChild(outline);
+            layers.AppendChild(inner);
+
+            // No drop shadow, unlike the block's frame. A blur over a box the size of the block is
+            // re-run on every frame the copy moves, and the copy is the thing being dragged; the
+            // amber, its rim and the label keep it legible without one.
+            return new ControlTemplate(typeof(Thumb)) { VisualTree = layers };
+        }
+
+        /// <summary>
+        /// The small label in a copy's corner. It is what keeps the copy from reading as a block still
+        /// being drawn — the drag preview is dashed too — and it names the switch the user would turn
+        /// off to make it go away.
+        /// </summary>
+        private static ControlTemplate BuildGripTemplate(double uiScale)
+        {
+            var text = new FrameworkElementFactory(typeof(TextBlock));
+            text.SetValue(TextBlock.TextProperty, LocalizationService.Get("S.Realtime.CompareDisplay"));
+            // 13 rather than the 11 of the block's other small glyphs: at 11 it was the one piece of
+            // text over a busy scene that had to be squinted at. The padding grows with it.
+            text.SetValue(TextBlock.FontSizeProperty, 13.0 * uiScale);
+            // Dark on the amber: white on it is too little contrast to read.
+            text.SetValue(TextBlock.ForegroundProperty, CopyLabelForeground);
+            text.SetValue(TextOptions.TextFormattingModeProperty, TextFormattingMode.Display);
+
+            var label = new FrameworkElementFactory(typeof(Border));
+            label.SetValue(Border.BackgroundProperty, CopyLabelFill);
+            label.SetValue(Border.CornerRadiusProperty, new CornerRadius(3.5 * uiScale));
+            label.SetValue(Border.PaddingProperty, new Thickness(6 * uiScale, 1.2 * uiScale, 6 * uiScale, 2.4 * uiScale));
+            label.AppendChild(text);
+
+            return new ControlTemplate(typeof(Thumb)) { VisualTree = label };
+        }
+
+        /// <summary>
+        /// The copy's ✕: the block's remove button in the copy's amber rather than the block's blue,
+        /// because this one only lets go of a copy and the other destroys a block, and the two must
+        /// not be mistaken for each other.
+        /// </summary>
+        private static ControlTemplate BuildCopyCloseTemplate(double removeSize, double uiScale)
+        {
+            // Two strokes rather than the ✕ character: a font's cross is a hairline at this size and
+            // no weight of it is much heavier, where a drawn one can be given the weight it needs.
+            var glyph = new FrameworkElementFactory(typeof(System.Windows.Shapes.Path));
+            glyph.SetValue(System.Windows.Shapes.Path.DataProperty, Geometry.Parse("M0,0 L1,1 M1,0 L0,1"));
+            glyph.SetValue(System.Windows.Shapes.Shape.StretchProperty, Stretch.Fill);
+            glyph.SetValue(System.Windows.Shapes.Shape.StrokeProperty, CopyCloseForeground);
+            glyph.SetValue(System.Windows.Shapes.Shape.StrokeThicknessProperty, 1.6 * uiScale);
+            glyph.SetValue(System.Windows.Shapes.Shape.StrokeStartLineCapProperty, PenLineCap.Round);
+            glyph.SetValue(System.Windows.Shapes.Shape.StrokeEndLineCapProperty, PenLineCap.Round);
+            glyph.SetValue(FrameworkElement.WidthProperty, 8.0 * uiScale);
+            glyph.SetValue(FrameworkElement.HeightProperty, 8.0 * uiScale);
+            glyph.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            glyph.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+
+            var chip = new FrameworkElementFactory(typeof(Border));
+            chip.SetValue(Border.BackgroundProperty, CopyCloseFill);
+            chip.SetValue(Border.CornerRadiusProperty, new CornerRadius(removeSize / 2));
+            chip.AppendChild(glyph);
+
+            return new ControlTemplate(typeof(Button)) { VisualTree = chip };
+        }
+
         private static ControlTemplate BuildHandleTemplate(double handleSize, double uiScale)
         {
             var handle = new FrameworkElementFactory(typeof(Border));
             handle.SetValue(Border.BackgroundProperty, HandleFill);
             handle.SetValue(Border.BorderBrushProperty, FrameStroke);
             handle.SetValue(Border.BorderThicknessProperty, new Thickness(2 * uiScale));
+            handle.SetValue(Border.CornerRadiusProperty, new CornerRadius(handleSize / 2));
+            return new ControlTemplate(typeof(Thumb)) { VisualTree = handle };
+        }
+
+        // The block's handle inverted: the outline's amber inside, a white ring round it.
+        private static ControlTemplate BuildCopyHandleTemplate(double handleSize, double uiScale)
+        {
+            var handle = new FrameworkElementFactory(typeof(Border));
+            handle.SetValue(Border.BackgroundProperty, CopyStroke);
+            handle.SetValue(Border.BorderBrushProperty, HandleFill);
+            handle.SetValue(Border.BorderThicknessProperty, new Thickness(1.5 * uiScale));
             handle.SetValue(Border.CornerRadiusProperty, new CornerRadius(handleSize / 2));
             return new ControlTemplate(typeof(Thumb)) { VisualTree = handle };
         }
@@ -736,10 +1481,7 @@ public partial class RealtimeEditWindow : Window
             var chip = new FrameworkElementFactory(typeof(Border));
             chip.SetValue(Border.BackgroundProperty, FrameStroke);
             chip.SetValue(Border.CornerRadiusProperty, new CornerRadius(removeSize / 2));
-            chip.SetValue(UIElement.EffectProperty, new DropShadowEffect
-            {
-                BlurRadius = 8 * uiScale, ShadowDepth = 0, Opacity = 0.4, Color = Colors.Black
-            });
+            // No drop shadow, like the trays — see Plate in ModeSegments for why they went.
             chip.AppendChild(glyph);
 
             return new ControlTemplate(typeof(Button)) { VisualTree = chip };
@@ -779,9 +1521,9 @@ public partial class RealtimeEditWindow : Window
     ///
     /// ON THE TEXT LOOKING SOFT. This window is layered (<c>AllowsTransparency</c>), and WPF turns
     /// ClearType off for the whole of a layered window — every glyph here is greyscale antialiased
-    /// and no setting changes that. What is left is worth doing and is done below: the drop shadows
-    /// are drawn on their own layer rather than on an ancestor of the text, because an Effect pushes
-    /// everything beneath it through an intermediate surface; the text is formatted in Display mode,
+    /// and no setting changes that. What is left is worth doing and is done below: no ancestor of the
+    /// text carries an Effect, because an Effect pushes everything beneath it through an intermediate
+    /// surface and the text comes back softer; the text is formatted in Display mode,
     /// which snaps stems to whole pixels at the small sizes used here; and the control rounds its own
     /// layout, while the canvas rounds the position it is placed at, so the first glyph starts on the
     /// pixel grid instead of half way across one — the same fix AboutOverlay's card carries, for the
@@ -874,6 +1616,11 @@ public partial class RealtimeEditWindow : Window
         private readonly double _collapsedWidth;
         private readonly double _collapsedHeight;
         private readonly double _expandedHintHeight;
+
+        // What the restore button adds to the trays' width while it is showing: it is measured out
+        // with the rest, collapsed, so the widths above do not include it.
+        private readonly double _restoreWidth;
+        private bool _restoreShown;
 
         // Which segment the pointer went down on, or -1. The click is committed on release and only
         // if the pointer is still over that segment, so a press the user thought better of can be
@@ -1102,6 +1849,22 @@ public partial class RealtimeEditWindow : Window
             header.Children.Add(directionTrack);
             header.Children.Add(_guidanceToggle);
 
+            // Last in the row and the size of the toggle beside it, in the block's blue rather than
+            // the trays' dark: it acts on the block, and it is the one tray that is not always there.
+            Restore = new Button
+            {
+                Width = height,
+                Height = height,
+                Margin = new Thickness(gap, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                Cursor = Cursors.Hand,
+                ToolTip = LocalizationService.Get("S.Realtime.CompareShowBlock"),
+                Template = BuildRestoreTemplate(height, uiScale),
+                Visibility = Visibility.Collapsed,
+            };
+            header.Children.Add(Restore);
+            _restoreWidth = height + gap;
+
             _hints = [BuildHint(SubtitleHint, uiScale), BuildHint(PanelHint, uiScale)];
 
             // Both sentences are laid out at once and only one is opaque, so the plate is as tall as
@@ -1263,7 +2026,48 @@ public partial class RealtimeEditWindow : Window
         public RealtimeTextOrientation TextOrientation { get; private set; }
 
         /// <summary>Current size, so the caller can keep the visible surface on screen.</summary>
-        public double TotalWidth => _guidanceExpanded ? _expandedWidth : _collapsedWidth;
+        public double TotalWidth
+        {
+            get
+            {
+                double header = _collapsedWidth + (_restoreShown ? _restoreWidth : 0);
+                return _guidanceExpanded ? Math.Max(_expandedWidth, header) : header;
+            }
+        }
+
+        /// <summary>
+        /// Brings the block's turned-off 對照顯示 copy back. Shown by <see cref="SetRestoreShown"/>
+        /// only while there is a copy to bring back.
+        /// </summary>
+        public Button Restore { get; }
+
+        public void SetRestoreShown(bool shown)
+        {
+            _restoreShown = shown;
+            Restore.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        // 對照顯示's glyph on the block's blue, a little translucent like the trays beside it.
+        private static ControlTemplate BuildRestoreTemplate(double size, double uiScale)
+        {
+            var glyph = new FrameworkElementFactory(typeof(System.Windows.Shapes.Path));
+            glyph.SetValue(System.Windows.Shapes.Path.DataProperty, CompareGlyph);
+            glyph.SetValue(System.Windows.Shapes.Shape.StretchProperty, Stretch.Uniform);
+            glyph.SetValue(FrameworkElement.WidthProperty, size * 0.55);
+            glyph.SetValue(FrameworkElement.HeightProperty, size * 0.55);
+            glyph.SetValue(System.Windows.Shapes.Shape.StrokeProperty, RemoveForeground);
+            glyph.SetValue(System.Windows.Shapes.Shape.StrokeThicknessProperty, 1.2 * uiScale);
+            glyph.SetValue(System.Windows.Shapes.Shape.StrokeStartLineCapProperty, PenLineCap.Round);
+            glyph.SetValue(System.Windows.Shapes.Shape.StrokeEndLineCapProperty, PenLineCap.Round);
+            glyph.SetValue(System.Windows.Shapes.Shape.StrokeLineJoinProperty, PenLineJoin.Round);
+
+            var chip = new FrameworkElementFactory(typeof(Border));
+            chip.SetValue(Border.BackgroundProperty, RestoreFill);
+            chip.SetValue(Border.CornerRadiusProperty, new CornerRadius(size / 2));
+            chip.AppendChild(glyph);
+
+            return new ControlTemplate(typeof(Button)) { VisualTree = chip };
+        }
 
         public double TotalHeight => _guidanceExpanded ? _expandedHeight : _collapsedHeight;
 
@@ -1383,42 +2187,36 @@ public partial class RealtimeEditWindow : Window
         }
 
         /// <summary>
-        /// A surface with its shadow on one layer and its contents on another.
+        /// A dark surface with a hairline along its top edge, holding the content.
         /// </summary>
         /// <remarks>
-        /// The two layers exist only so the text is not a descendant of the Effect. An Effect renders
-        /// its whole subtree into an intermediate surface first, and text that has been through one
-        /// comes back softer than text drawn straight onto the window — which on a layered window,
-        /// where ClearType is already unavailable, is the difference between legible and not. The
-        /// shadow layer holds the fill and the effect and nothing else; the content layer holds the
-        /// hairline and the children, and carries no effect at all.
+        /// <para>No drop shadow. Each plate had one, and with four plates and the remove button they
+        /// were five blurs re-run on every frame of a drag: measured under a GPU-bound game, dropping
+        /// them took the drag from 19 to 55 frames a second, and over bright and dark scenes alike
+        /// the near-opaque plates look no different without them.</para>
+        ///
+        /// <para>The hairline is a border nested inside the fill rather than the fill's own border:
+        /// a Border paints its background inside its border, so on one element the hairline would
+        /// sit over whatever is behind the plate instead of over the plate. The fill is itself inside
+        /// the Border returned, which carries no fill of its own: callers size and style that one,
+        /// and the guidance toggle sets its background to make the whole circle clickable.</para>
         /// </remarks>
-        private static Border Plate(double width, CornerRadius corner, UIElement content, double uiScale)
+        private static Border Plate(double width, CornerRadius corner, UIElement content, double uiScale) => new()
         {
-            var shadow = new Border
+            Width = width,
+            Child = new Border
             {
                 CornerRadius = corner,
                 Background = ModeTrack,
-                Effect = new DropShadowEffect
+                Child = new Border
                 {
-                    BlurRadius = 8 * uiScale, ShadowDepth = 0, Opacity = 0.4, Color = Colors.Black
+                    CornerRadius = corner,
+                    BorderBrush = ModeTrackEdge,
+                    BorderThickness = new Thickness(0, 1 * uiScale, 0, 0),
+                    Child = content,
                 },
-            };
-
-            var body = new Border
-            {
-                CornerRadius = corner,
-                BorderBrush = ModeTrackEdge,
-                BorderThickness = new Thickness(0, 1 * uiScale, 0, 0),
-                Child = content,
-            };
-
-            var layers = new Grid();
-            layers.Children.Add(shadow);
-            layers.Children.Add(body);
-
-            return new Border { Width = width, Child = layers };
-        }
+            },
+        };
 
         /// <summary>
         /// Animates one transform property to a new value, from wherever it is on screen right now.

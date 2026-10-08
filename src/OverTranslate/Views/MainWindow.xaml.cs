@@ -1,6 +1,6 @@
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
-using System.Diagnostics;
 using System.Windows;
 using System.Windows.Forms;
 using System.Windows.Interop;
@@ -20,7 +20,6 @@ namespace OverTranslate.Views;
 public partial class MainWindow : Window
 {
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
-    private static long _nextCaptureTranslationId;
 
     private NotifyIcon? _notifyIcon;
     private TrayMenuWindow? _trayMenu;
@@ -36,15 +35,10 @@ public partial class MainWindow : Window
     private AnnotationPanelWindow? _annotationPanel; // only while 標記 is on
     private AnnotationShortcutHook? _annotationKeys;  // likewise
 
-    // Which pen 標記 has in hand. Reset by every new capture and kept nowhere else: what it is for
-    // is closing the panel and reopening it inside one capture without losing the colour just
-    // chosen, and that is the whole of it. Across captures the defaults are the point — a fresh
-    // capture is a fresh piece of work, and starting it on whatever was left over from the last one
-    // is a state the user has to notice and undo before drawing.
+    // Which tool 標記 has in hand. Reset by every new capture and kept nowhere else: what it is for
+    // is closing the panel and reopening it inside one capture without putting the tool down. The
+    // colour and the widths are preferences and live in CaptureSettings.Annotation instead.
     private Models.AnnotationTool _annotationTool = AnnotationPanelWindow.DefaultTool;
-    private System.Windows.Media.Color _annotationColor = AnnotationPanelWindow.DefaultColor;
-    private double _annotationThickness = AnnotationPanelWindow.DefaultThickness;
-    private double _annotationOpacity = AnnotationPanelWindow.DefaultOpacity;
     private GlobalEscapeHook? _escapeHook; // lives for the whole capture session, see CloseAll
     private SystemRecoveryYield? _recoveryYield; // same lifetime; lets Task Manager out from under the layers
     private CancellationTokenSource? _sessionCts; // cancelled on teardown so abandoned work stops
@@ -57,11 +51,13 @@ public partial class MainWindow : Window
     // translation page's: the two are separate places with separate stop buttons, and one shared
     // player would have the page's speaker silently stop a capture that is still reading.
     private readonly TtsService _tts = new();
-    private readonly CaptureTranslationCache _captureTranslationCache = new();
-    private readonly CaptureOcrReuse _captureOcrReuse = new();
 
     // Kept alive so toolbar translate can re-run OCR/translation on the current selection
     private List<OcrTextBlock> _lastOcrBlocks = [];
+
+    // Shared by 翻譯 and 複製原文: both recognise the same crop with the same arguments.
+    private readonly CaptureOcrReuse _ocrReuse = new();
+    private readonly CaptureTranslationCache _captureTranslationCache = new();
 
     // What the translator answered, one entry per group. Copying, the translation window and the
     // toolbar read this, and they must keep reading it: placement below may cut a group up so that
@@ -275,11 +271,11 @@ public partial class MainWindow : Window
     /// A notification through the tray icon, which Windows presents in its own notification centre.
     /// </summary>
     /// <remarks>
-    /// The application's own <see cref="ToastWindow"/> is for things that belong to a capture — it
-    /// appears beside the selection it is talking about and disappears with it. Something the user
-    /// caused from outside any capture, such as a shortcut that declined to start one, has no such
-    /// anchor, and telling them through the shell they already associate with this application is
-    /// both less startling and something they can go back and read.
+    /// The notice on the capture toolbar (<see cref="ToolbarWindow.ShowNotice"/>) is for things that
+    /// belong to a capture — it appears on the bar the user just pressed and disappears with it.
+    /// Something the user caused from outside any capture, such as a shortcut that declined to start
+    /// one, has no such anchor, and telling them through the shell they already associate with this
+    /// application is both less startling and something they can go back and read.
     /// </remarks>
     private void ShowTrayNotification(string title, string message)
     {
@@ -665,7 +661,7 @@ public partial class MainWindow : Window
                 _toolbarWindow?.FollowSelection(selection);
                 // OCR geometry belongs to the old crop until the user recognises this one.
                 _lastOcrBlocks = [];
-                _captureOcrReuse.Clear();
+                _ocrReuse.Clear();
                 _overlayWindow?.ShowOcrDebug([], selection.Left, selection.Top);
 
                 // The marks stay where they were drawn; what moves is the window onto them. See
@@ -721,7 +717,7 @@ public partial class MainWindow : Window
             EnterOverlayState(captureWindow, selection, [], [], settings.SourceLanguage, hasTranslated: false);
 
             // Fire in the same pass that built the overlay, before it paints: the toolbar's first
-            // frame and overlay already read "翻譯中..." / "翻譯中".
+            // frame already reads "翻譯中..." and the overlay's first frame already shows "辨識中".
             // Deferring this to a later dispatcher pass only adds a visible gap where the toolbar
             // sits idle after the selection is done.
             if (settings.AutoTranslateAfterSelection)
@@ -745,7 +741,6 @@ public partial class MainWindow : Window
     {
         _selectionSessionId++;
         _lastOcrBlocks     = ocrBlocks;
-        _captureOcrReuse.Clear();
         _lastTranslatedBlocks = blocks;
         _lastColoredBlocks = blocks;
         _lastSelPhysLeft   = selection.Left;
@@ -754,10 +749,7 @@ public partial class MainWindow : Window
         _lastSelPhysHeight = selection.Height;
         _lastVerticalText  = false;
 
-        _annotationTool      = AnnotationPanelWindow.DefaultTool;
-        _annotationColor     = AnnotationPanelWindow.DefaultColor;
-        _annotationThickness = AnnotationPanelWindow.DefaultThickness;
-        _annotationOpacity   = AnnotationPanelWindow.DefaultOpacity;
+        _annotationTool = AnnotationPanelWindow.DefaultTool;
 
         var settings = SettingsService.Instance.Current;
         ShowOverlay(
@@ -846,10 +838,8 @@ public partial class MainWindow : Window
         _overlayClosedHandler = (_, _) =>
         {
             _selectionSessionId++;
-            _captureOcrReuse.Clear();
             DisposeSessionHooks();
             CancelSession();
-            ToastWindow.Dismiss();
             CloseAnnotationPanel();
             CloseWindow(_toolbarWindow, w => w.Close(), nameof(ToolbarWindow));
             _toolbarWindow = null;
@@ -888,21 +878,20 @@ public partial class MainWindow : Window
 
         if (AppServices.Translation.RequiresApiKey && string.IsNullOrWhiteSpace(settings.ApiKey))
         {
-            ShowBalloon(
+            ShowNotice(
                 LocalizationService.Get("S.Main.MissingApiKeyTitle"),
-                LocalizationService.Get("S.Main.MissingApiKeyBody"), selRect);
+                LocalizationService.Get("S.Main.MissingApiKeyBody"));
             return;
         }
 
         requestToolbar?.SetBusy(true);
-        var requestId = Interlocked.Increment(ref _nextCaptureTranslationId);
-        using var diagnosticScope = CaptureTranslationDiagnostics.Begin(requestId);
-        var totalTimer = Stopwatch.StartNew();
-        var stageStarted = Stopwatch.GetTimestamp();
-        var stage = "prepare";
-        var outcome = "interrupted";
-        Log.Info("Capture translation {RequestId} started engine={Engine} source={Source} target={Target}",
-            requestId, settings.Provider, req.SourceLang, req.TargetLang);
+
+        // Each stage's share of the wait, for the line written when the bubbles are up. Recognition,
+        // the engine and the backdrop repair are each "the slow one" on some machine or screen, and
+        // a report of a slow capture says nothing about which without this.
+        var started = Stopwatch.GetTimestamp();
+        using var translationDiagnostic = CaptureTranslationDiagnostics.Begin(requestSessionId);
+        long ocrMs = 0, translateMs = 0, backdropMs = 0;
 
         // Whether the frame may still be handed back: this run is what locked it, and recognition —
         // the one stage a redrawn box would fix — has not got past finding text yet. Cleared the
@@ -914,10 +903,9 @@ public partial class MainWindow : Window
         {
             if (requestCaptureWindow == null || !requestCaptureWindow.PrepareForProcessing(out frameStillRestorable))
             {
-                outcome = "no-image";
-                ShowBalloon(
+                ShowNotice(
                     LocalizationService.Get("S.Main.RecogniseFailedTitle"),
-                    LocalizationService.Get("S.Main.NoImageBody"), selRect);
+                    LocalizationService.Get("S.Main.NoImageBody"));
                 return;
             }
 
@@ -933,52 +921,29 @@ public partial class MainWindow : Window
             // instance directly. Take our own copy up front — cloning here is safe because we are
             // still on the UI thread with no await since PrepareForTranslation — and let its
             // lifetime match this request instead of the window's.
-            var sourceBitmap = requestCaptureWindow.CroppedBitmap!;
-            using var workBitmap = ClonePixels(sourceBitmap);
+            using var workBitmap = ClonePixels(requestCaptureWindow.CroppedBitmap!);
 
-            _overlayWindow?.ShowProcessing(
-                _lastSelPhysLeft,
-                _lastSelPhysTop,
-                _lastSelPhysWidth,
-                _lastSelPhysHeight,
-                LocalizationService.Get("S.Main.Translating"));
-
-            Log.Info("Capture translation {RequestId} stage=prepare elapsedMs={ElapsedMs} image={Width}x{Height}",
-                requestId, (int)Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds,
-                workBitmap.Width, workBitmap.Height);
-            stage = "ocr";
-            stageStarted = Stopwatch.GetTimestamp();
-            // A locked capture keeps this exact bitmap until the selection is edited or closed.
-            // Re-running OCR on it after changing only the target language wastes the slowest local
-            // stage, while a new crop or source/layout mode still gets a fresh recognition.
-            var reusedOcr = _captureOcrReuse.TryGet(
-                sourceBitmap, req.SourceLang, req.IsVerticalText, req.LayoutMode,
-                out var previousBlocks);
-            var recognizedBlocks = reusedOcr
-                ? previousBlocks
-                : await AppServices.Ocr.RecognizeAsync(
-                    workBitmap,
-                    req.SourceLang,
-                    cancellationToken,
-                    req.IsVerticalText,
-                    CaptureLayoutPolicy.ForApplication(req.LayoutMode));
-            Log.Info("Capture translation {RequestId} stage=ocr elapsedMs={ElapsedMs} blocks={Blocks} reused={Reused}",
-                requestId, (int)Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds,
-                recognizedBlocks.Count, reusedOcr);
-            if (!IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow))
+            var stage = Stopwatch.GetTimestamp();
+            var recognition = await RecognizeCropAsync(
+                requestCaptureWindow,
+                workBitmap,
+                req.SourceLang,
+                req.IsVerticalText,
+                req.LayoutMode,
+                () => IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow),
+                cancellationToken, progressKey: "S.Main.Translating");
+            if (recognition is not (var recognizedBlocks, var ocrReused))
                 return;
+            ocrMs = ElapsedMs(stage);
 
             _lastOcrBlocks = recognizedBlocks;
-            _captureOcrReuse.Store(
-                sourceBitmap, req.SourceLang, req.IsVerticalText, req.LayoutMode, recognizedBlocks);
             if (_lastOcrBlocks.Count == 0)
             {
-                outcome = "no-text";
                 requestToolbar?.SetTranslationState(false);
                 if (frameStillRestorable) requestCaptureWindow.RestoreSelectionEditing();
-                ShowBalloon(
+                ShowNotice(
                     LocalizationService.Get("S.Main.NoTextTitle"),
-                    LocalizationService.Get("S.Main.NoTextBody"), selRect, ToastKind.Info);
+                    LocalizationService.Get("S.Main.NoTextBody"), NoticeKind.Info);
                 return;
             }
 
@@ -994,42 +959,34 @@ public partial class MainWindow : Window
             // Recognition is available even while translation is still pending.
             _overlayWindow?.ShowOcrDebug(_lastOcrBlocks, _lastSelPhysLeft, _lastSelPhysTop);
 
-            // A capture uses only the selected engine; its failure is shown by the handler below.
-            stage = "translation";
-            stageStarted = Stopwatch.GetTimestamp();
+            stage = Stopwatch.GetTimestamp();
+            var provider = settings.Provider;
             List<TranslatedBlock> translated;
-            if (settings.Provider == Models.TranslationProvider.Google)
+            if (provider is Models.TranslationProvider.Google or Models.TranslationProvider.GoogleChrome)
             {
                 var cached = await _captureTranslationCache.TranslateAsync(
-                    _lastOcrBlocks, settings.Provider, req.SourceLang, req.TargetLang,
+                    _lastOcrBlocks, Models.TranslationProvider.Google, req.SourceLang, req.TargetLang,
                     async missing =>
                     {
-                        var (answers, _) = await AppServices.Translation.TranslateAsync(
+                        var (answer, _) = await AppServices.Translation.TranslateAsync(
                             missing, req.SourceLang, req.TargetLang, settings.ApiKey,
-                            cancellationToken: cancellationToken,
-                            engine: settings.Provider);
-                        return answers;
+                            cancellationToken: cancellationToken, engine: provider);
+                        return answer;
                     });
                 translated = cached.Blocks;
-                Log.Info("Capture translation {RequestId} cache hits={Hits} requests={Requests} blocks={Blocks}",
-                    requestId, cached.Hits, cached.Requests, _lastOcrBlocks.Count);
+                Log.Debug("Capture translation cache hits={Hits} requested={Requested}", cached.Hits, cached.Requests);
             }
             else
             {
                 (translated, _) = await AppServices.Translation.TranslateAsync(
                     _lastOcrBlocks, req.SourceLang, req.TargetLang, settings.ApiKey,
-                    cancellationToken: cancellationToken,
-                    engine: settings.Provider);
+                    cancellationToken: cancellationToken, engine: provider);
             }
-            Log.Info("Capture translation {RequestId} stage=translation elapsedMs={ElapsedMs} blocks={Blocks}",
-                requestId, (int)Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds,
-                translated.Count);
             if (!IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow))
                 return;
+            translateMs = ElapsedMs(stage);
 
             _lastTranslatedBlocks = [.. translated];
-            stage = "placement";
-            stageStarted = Stopwatch.GetTimestamp();
 
             // Between the translation and the colour sampling, and it has to be exactly here.
             // Placement is what decides the boxes the overlay will draw, and a colour sampled from
@@ -1058,29 +1015,27 @@ public partial class MainWindow : Window
                         };
                     }
 
-                    var (bg, fg) = SourceTextColorSampler.ForCaptureOverlay(
-                        workBitmap, b.Bounds, b.SourceLineBounds, req.IsVerticalText);
+                    // A group off a tilted card is read from inside the card: its upright box and
+                    // the gaps between its upright lines are mostly the page beside it. A row on a
+                    // vertical page has its lines one above the other, as any paragraph across does.
+                    var (bg, fg) = b.Tilt is { } tilt
+                        ? SourceTextColorSampler.ForCaptureOverlay(workBitmap, tilt.SampleArea)
+                        : SourceTextColorSampler.ForCaptureOverlay(
+                            workBitmap, b.Bounds, b.SourceLineBounds, req.IsVerticalText && !b.RunsAcross);
                     return b with { BackgroundColor = bg, TextColor = fg };
                 })
                 .ToList();
-            Log.Info("Capture translation {RequestId} stage=placement elapsedMs={ElapsedMs} blocks={Blocks}",
-                requestId, (int)Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds,
-                coloredTranslated.Count);
 
             // Off the UI thread: this repairs the whole capture once, for every bubble that is
             // about to be drawn over it. Null on failure, and the overlay then paints flat colour.
-            stage = "backdrop";
-            stageStarted = Stopwatch.GetTimestamp();
+            stage = Stopwatch.GetTimestamp();
             var backdrop = await Task.Run(
                 () => CaptureBubbleBackdrop.Create(workBitmap, coloredTranslated, cancellationToken),
                 cancellationToken);
-            Log.Info("Capture translation {RequestId} stage=backdrop elapsedMs={ElapsedMs}",
-                requestId, (int)Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds);
             if (!IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow))
                 return;
+            backdropMs = ElapsedMs(stage);
 
-            stage = "display";
-            stageStarted = Stopwatch.GetTimestamp();
             _lastColoredBlocks = coloredTranslated;
             _lastVerticalText = req.IsVerticalText;
             _lastBackdrop = backdrop;
@@ -1097,37 +1052,41 @@ public partial class MainWindow : Window
                 backdrop);
             requestToolbar?.SetTranslationState(true);
             requestToolbar?.SetToggleEnabled(coloredTranslated.Count > 0);
-            Log.Info("Capture translation {RequestId} stage=display elapsedMs={ElapsedMs}",
-                requestId, (int)Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds);
-            outcome = "success";
+            if (translated.Any(block => block.Untranslated))
+                ShowNotice(
+                    LocalizationService.Get("S.Main.TranslateFailedTitle"),
+                    LocalizationService.Get("S.Error.NotTranslated"));
+
+            // Sizes and times only, never the text: this is Info, in every diagnostic bundle.
+            Log.Info("Capture translation done in {Total} ms: {Width}x{Height}, {Blocks} blocks, " +
+                     "ocr {Ocr} ms{Reused:l}, translate {Translate} ms, backdrop {Backdrop} ms",
+                ElapsedMs(started), workBitmap.Width, workBitmap.Height, _lastOcrBlocks.Count,
+                ocrMs, ocrReused ? " (reused)" : "", translateMs, backdropMs);
         }
         // The session was torn down (Esc, re-capture, toolbar close) while this was in flight.
         // Expected and user-initiated — it must stay completely silent, with no error toast.
         catch (OperationCanceledException)
         {
-            outcome = "cancelled";
             Log.Debug("Translate request abandoned — capture session ended");
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("sequence contains no elements", StringComparison.OrdinalIgnoreCase))
         {
-            outcome = "no-text";
             Log.Debug(ex, "OCR produced no text blocks");
             if (!IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow))
                 return;
 
             requestToolbar?.SetTranslationState(false);
             if (frameStillRestorable) requestCaptureWindow?.RestoreSelectionEditing();
-            ShowBalloon(
+            ShowNotice(
                 LocalizationService.Get("S.Main.NoTextTitle"),
-                LocalizationService.Get("S.Main.NoTextBody"), selRect, ToastKind.Info);
+                LocalizationService.Get("S.Main.NoTextBody"), NoticeKind.Info);
         }
         catch (Exception ex)
         {
-            outcome = "failed";
-            Log.Error("Capture translation {RequestId} failed stage={Stage} stageElapsedMs={StageElapsedMs} exception={ExceptionType}",
-                requestId, stage, (int)Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds,
-                ex.GetType().Name);
-            Log.Debug(ex, "Capture translation {RequestId} exception details", requestId);
+            // How far it got, and how long that took: a timeout reads differently from a refusal.
+            Log.Error(ex, "Translate request failed after {Elapsed} ms (src={Src}, tgt={Tgt}, selection={Sel}, " +
+                          "ocr {Ocr} ms, translate {Translate} ms)",
+                ElapsedMs(started), req.SourceLang, req.TargetLang, selRect, ocrMs, translateMs);
             if (!IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow))
                 return;
 
@@ -1145,15 +1104,12 @@ public partial class MainWindow : Window
                 _lastBackdrop);
             requestToolbar?.SetTranslationState(_lastColoredBlocks.Count > 0);
             requestToolbar?.SetToggleEnabled(_lastColoredBlocks.Count > 0);
-            ShowBalloon(
+            ShowNotice(
                 LocalizationService.Get("S.Main.TranslateFailedTitle"),
-                LocalizationService.Format("S.Main.TranslateFailedBody", ex.Message), selRect);
+                LocalizationService.Format("S.Main.TranslateFailedBody", ex.Message));
         }
         finally
         {
-            Log.Info("Capture translation {RequestId} finished outcome={Outcome} stage={Stage} stageElapsedMs={StageElapsedMs} totalMs={ElapsedMs}",
-                requestId, outcome, stage, (int)Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds,
-                (int)totalTimer.Elapsed.TotalMilliseconds);
             if (IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow))
             {
                 _overlayWindow?.RestoreIdle(_lastColoredBlocks.Count > 0);
@@ -1174,6 +1130,54 @@ public partial class MainWindow : Window
     private static Bitmap ClonePixels(Bitmap source) =>
         source.Clone(new Rectangle(0, 0, source.Width, source.Height), source.PixelFormat);
 
+    /// <summary>
+    /// Recognises the locked crop, or hands back its last recognition when nothing recognition
+    /// sees has changed — see <see cref="CaptureOcrReuse"/>.
+    /// </summary>
+    /// <param name="captureWindow">
+    /// The window the crop was cut from, locked for this request; with its selection, what
+    /// identifies the picture.
+    /// </param>
+    /// <param name="workBitmap">This request's copy of the crop, which is what is actually read.</param>
+    /// <returns>
+    /// The blocks, and whether they are the last recognition handed back; null when the session this
+    /// request belongs to has moved on in the meantime.
+    /// </returns>
+    private async Task<(List<OcrTextBlock> Blocks, bool Reused)?> RecognizeCropAsync(
+        ScreenCaptureWindow captureWindow,
+        Bitmap workBitmap,
+        string sourceLang,
+        bool verticalText,
+        CaptureLayoutMode requestedLayout,
+        Func<bool> stillCurrent,
+        CancellationToken cancellationToken,
+        string progressKey = "S.Main.Recognising")
+    {
+        var layoutMode = CaptureLayoutPolicy.ForApplication(requestedLayout);
+        var region     = captureWindow.Selection;
+        if (_ocrReuse.TryGet(captureWindow, region, sourceLang, verticalText, layoutMode, out var reused))
+        {
+            Log.Debug("Re-using the last recognition of this crop ({Count} blocks)", reused.Count);
+            return (reused, true);
+        }
+
+        _overlayWindow?.ShowProcessing(
+            _lastSelPhysLeft,
+            _lastSelPhysTop,
+            _lastSelPhysWidth,
+            _lastSelPhysHeight,
+            LocalizationService.Get(progressKey));
+
+        var recognized = await AppServices.Ocr.RecognizeAsync(
+            workBitmap, sourceLang, cancellationToken, verticalText, layoutMode);
+        if (!stillCurrent()) return null;
+
+        _ocrReuse.Remember(captureWindow, region, sourceLang, verticalText, layoutMode, recognized);
+        return (recognized, false);
+    }
+
+    private static long ElapsedMs(long since) => (long)Stopwatch.GetElapsedTime(since).TotalMilliseconds;
+
     private async void OnCopyTextRequested(object? sender, CopyTextRequest req)
     {
         var requestToolbar = sender as ToolbarWindow;
@@ -1189,14 +1193,14 @@ public partial class MainWindow : Window
                 var cachedText = req.Kind == CopyTextKind.Translation
                     ? JoinWithoutLineBreaks(_lastTranslatedBlocks.Select(block => block.TranslatedText))
                     : JoinWithoutLineBreaks(_lastOcrBlocks.Select(block => block.Text));
-                CopyCaptureText(cachedText, req.Kind, selRect);
+                CopyCaptureText(cachedText, req.Kind);
             }
             catch (Exception ex)
             {
                 Log.Error(ex, "Copy cached capture text failed (kind={Kind})", req.Kind);
-                ShowBalloon(
+                ShowNotice(
                     LocalizationService.Get("S.Main.CopyFailedTitle"),
-                    LocalizationService.Get("S.Main.CopyTextFailedBody"), selRect);
+                    LocalizationService.Get("S.Main.CopyTextFailedBody"));
             }
             return;
         }
@@ -1212,9 +1216,9 @@ public partial class MainWindow : Window
         {
             if (requestCaptureWindow == null || !requestCaptureWindow.PrepareForProcessing(out frameLockedByThisCopy))
             {
-                ShowBalloon(
+                ShowNotice(
                     LocalizationService.Get("S.Main.RecogniseFailedTitle"),
-                    LocalizationService.Get("S.Main.NoImageBody"), selRect);
+                    LocalizationService.Get("S.Main.NoImageBody"));
                 return;
             }
 
@@ -1225,37 +1229,31 @@ public partial class MainWindow : Window
             selRect = requestCaptureWindow.Selection;
 
             using var workBitmap = ClonePixels(requestCaptureWindow.CroppedBitmap!);
-            _overlayWindow?.ShowProcessing(
-                _lastSelPhysLeft,
-                _lastSelPhysTop,
-                _lastSelPhysWidth,
-                _lastSelPhysHeight,
-                LocalizationService.Get("S.Main.Recognising"));
 
-            var recognizedBlocks = await AppServices.Ocr.RecognizeAsync(
+            var recognition = await RecognizeCropAsync(
+                requestCaptureWindow,
                 workBitmap,
                 req.SourceLang,
-                cancellationToken,
                 req.IsVerticalText,
-                CaptureLayoutPolicy.ForApplication(req.LayoutMode));
-            if (!IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow))
+                req.LayoutMode,
+                () => IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow),
+                cancellationToken);
+            if (recognition is not (var recognizedBlocks, _))
                 return;
 
             _lastOcrBlocks = recognizedBlocks;
-            _captureOcrReuse.Clear();
             _overlayWindow?.ShowOcrDebug(_lastOcrBlocks, _lastSelPhysLeft, _lastSelPhysTop);
             if (_lastOcrBlocks.Count == 0)
             {
-                ShowBalloon(
+                ShowNotice(
                     LocalizationService.Get("S.Main.NoTextTitle"),
-                    LocalizationService.Get("S.Main.NoTextBody"), selRect, ToastKind.Info);
+                    LocalizationService.Get("S.Main.NoTextBody"), NoticeKind.Info);
                 return;
             }
 
             CopyCaptureText(
                 JoinWithoutLineBreaks(_lastOcrBlocks.Select(block => block.Text)),
-                CopyTextKind.Source,
-                selRect);
+                CopyTextKind.Source);
         }
         catch (OperationCanceledException)
         {
@@ -1267,9 +1265,9 @@ public partial class MainWindow : Window
             if (!IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow))
                 return;
 
-            ShowBalloon(
+            ShowNotice(
                 LocalizationService.Get("S.Main.CopyFailedTitle"),
-                LocalizationService.Get("S.Main.CopyTextFailedBody"), selRect);
+                LocalizationService.Get("S.Main.CopyTextFailedBody"));
         }
         finally
         {
@@ -1287,8 +1285,7 @@ public partial class MainWindow : Window
     /// </summary>
     /// <param name="text">The recognised original or the translation, already joined into one line</param>
     /// <param name="kind">Which of the two was copied, so the confirmation names the right one</param>
-    /// <param name="selRect">Selection the confirmation is positioned against</param>
-    private static void CopyCaptureText(string text, CopyTextKind kind, System.Windows.Rect selRect)
+    private void CopyCaptureText(string text, CopyTextKind kind)
     {
         var payload = text.Trim();
 
@@ -1297,21 +1294,20 @@ public partial class MainWindow : Window
         // cannot check without switching away.
         if (payload.Length == 0)
         {
-            ShowBalloon(
+            ShowNotice(
                 LocalizationService.Get("S.Main.NoTextTitle"),
-                LocalizationService.Get("S.Main.NoTextBody"), selRect, ToastKind.Info);
+                LocalizationService.Get("S.Main.NoTextBody"), NoticeKind.Info);
             return;
         }
 
         System.Windows.Clipboard.SetText(payload);
-        ShowBalloon(
+        ShowNotice(
             LocalizationService.Get("S.Main.CopiedTitle"),
             LocalizationService.Get(
                 kind == CopyTextKind.Translation
                     ? "S.Main.TranslationCopiedBody"
                     : "S.Main.TextCopiedBody"),
-            selRect,
-            ToastKind.Success);
+            NoticeKind.Success);
     }
 
     // Builds the "copy screenshot" image by compositing what the user actually sees in the
@@ -1321,16 +1317,14 @@ public partial class MainWindow : Window
     // layers are empty while processing, so RenderBubblesForSelection returns null then.
     private void OnCopyScreenshotRequested(object? sender, EventArgs e)
     {
-        var selRect = new System.Windows.Rect(
-            _lastSelPhysLeft, _lastSelPhysTop, _lastSelPhysWidth, _lastSelPhysHeight);
         try
         {
             var background = _captureWindow?.CreateSelectionImage();
             if (background is null)
             {
-                ShowBalloon(
+                ShowNotice(
                     LocalizationService.Get("S.Main.CopyFailedTitle"),
-                    LocalizationService.Get("S.Main.NoImageBody"), selRect);
+                    LocalizationService.Get("S.Main.NoImageBody"));
                 return;
             }
 
@@ -1358,13 +1352,14 @@ public partial class MainWindow : Window
             }
 
             System.Windows.Clipboard.SetImage(result);
+            _toolbarWindow?.ShowScreenshotCopied();
 
             var settings = SettingsService.Instance.Current;
             if (!settings.SaveScreenshotToDisk)
             {
-                ShowBalloon(
+                ShowNotice(
                     LocalizationService.Get("S.Main.CopiedTitle"),
-                    LocalizationService.Get("S.Main.CopiedBody"), selRect, ToastKind.Success);
+                    LocalizationService.Get("S.Main.CopiedBody"), NoticeKind.Success);
                 return;
             }
 
@@ -1372,24 +1367,24 @@ public partial class MainWindow : Window
             try
             {
                 var savedPath = ScreenshotSaveService.Save(result, settings.ScreenshotSavePath);
-                ShowBalloon(
+                ShowNotice(
                     LocalizationService.Get("S.Main.CopiedTitle"),
-                    LocalizationService.Format("S.Main.CopiedAndSavedBody", savedPath), selRect, ToastKind.Success);
+                    LocalizationService.Format("S.Main.CopiedAndSavedBody", savedPath), NoticeKind.Success);
             }
             catch (Exception ex)
             {
                 Log.Warn(ex, "Screenshot copied to clipboard but saving to disk failed");
-                ShowBalloon(
+                ShowNotice(
                     LocalizationService.Get("S.Main.CopiedSaveFailedTitle"),
-                    LocalizationService.Format("S.Main.CopiedSaveFailedBody", ex.Message), selRect);
+                    LocalizationService.Format("S.Main.CopiedSaveFailedBody", ex.Message));
             }
         }
         catch (Exception ex)
         {
             Log.Error(ex, "Copy screenshot failed");
-            ShowBalloon(
+            ShowNotice(
                 LocalizationService.Get("S.Main.CopyFailedTitle"),
-                LocalizationService.Format("S.Main.CopyFailedBody", ex.Message), selRect);
+                LocalizationService.Format("S.Main.CopyFailedBody", ex.Message));
         }
     }
 
@@ -1429,10 +1424,9 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             Log.Warn(ex, "Toolbar text-to-speech failed");
-            ShowBalloon(
+            ShowNotice(
                 LocalizationService.Get("S.Main.SpeakFailedTitle"),
-                LocalizationService.Format("S.Main.SpeakFailedBody", ex.Message),
-                CurrentSelectionRect());
+                LocalizationService.Format("S.Main.SpeakFailedBody", ex.Message));
         }
     }
 
@@ -1470,19 +1464,13 @@ public partial class MainWindow : Window
         Log.Info("Tearing down capture session, reason={Reason} (overlay={Overlay}, toolbar={Toolbar}, capture={Capture})",
             reason, _overlayWindow != null, _toolbarWindow != null, _captureWindow != null);
         _selectionSessionId++;
-        _captureOcrReuse.Clear();
         DisposeSessionHooks();
         CancelSession();
+        _ocrReuse.Clear();
 
         // A voice reading a selection that is no longer on screen has nothing left to be about, and
         // nothing would be left to stop it: the button that does is going with the toolbar.
         _tts.Stop();
-
-        // A toast is positioned against the selection it reported on. Once that selection is gone it
-        // has nothing left to point at, so it goes with the session rather than lingering on an
-        // empty desktop until its own timer runs out. The close button on the toast is what covers
-        // the reader who wants it gone sooner.
-        ToastWindow.Dismiss();
 
         // Detach handler before closing so we drive the teardown order ourselves
         if (_overlayWindow != null && _overlayClosedHandler != null)
@@ -1542,7 +1530,7 @@ public partial class MainWindow : Window
         _annotationPanel = null;
 
         var panel = new AnnotationPanelWindow(
-            _annotationTool, _annotationColor, _annotationThickness, _annotationOpacity);
+            _annotationTool, SettingsService.Instance.Current.Capture.Annotation);
         if (_captureWindow != null) panel.Owner = _captureWindow;
         panel.SettingsChanged += (_, _) => ApplyAnnotationSettings();
         panel.UndoRequested   += (_, _) => _overlayWindow?.UndoAnnotation();
@@ -1572,10 +1560,7 @@ public partial class MainWindow : Window
     {
         if (_annotationPanel is null) return;
 
-        _annotationTool      = _annotationPanel.Tool;
-        _annotationColor     = _annotationPanel.InkColor;
-        _annotationThickness = _annotationPanel.ThicknessFraction;
-        _annotationOpacity   = _annotationPanel.OpacityFraction;
+        _annotationTool = _annotationPanel.Tool;
 
         _overlayWindow?.SetAnnotationTool(_annotationPanel.Tool);
         _overlayWindow?.SetAnnotationColor(_annotationPanel.InkColor);
@@ -1645,6 +1630,10 @@ public partial class MainWindow : Window
 
         _overlayWindow?.EndAnnotating();
         _captureWindow?.SetAnnotationHold(false);
+
+        // The panel edits the preferences in memory as the user goes; they are written once here
+        // rather than on every step of a slider drag.
+        if (_annotationPanel is not null) SettingsService.Instance.Save();
 
         CloseWindow(_annotationPanel, w => w.Close(), nameof(AnnotationPanelWindow));
         _annotationPanel = null;
@@ -1798,9 +1787,18 @@ public partial class MainWindow : Window
         System.Windows.Application.Current.Shutdown();
     }
 
-    private static void ShowBalloon(
-        string title, string message, System.Windows.Rect? sel = null, ToastKind kind = ToastKind.Error) =>
-        ToastWindow.Show(title, message, sel, kind);
+    private void ShowNotice(string title, string message, NoticeKind kind = NoticeKind.Error)
+    {
+        if (_toolbarWindow is { } toolbar)
+        {
+            toolbar.ShowNotice(title, message, kind);
+            return;
+        }
+
+        // Every caller is answering a button on the toolbar, so this is a session that closed while
+        // the work behind the button was still running. Nothing on screen is left to say it on.
+        Log.Info("Toolbar notice dropped with no toolbar open, kind={Kind}, title=\"{Title}\"", kind, title);
+    }
 
     protected override void OnClosed(EventArgs e)
     {

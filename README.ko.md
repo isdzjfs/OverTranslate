@@ -1,0 +1,279 @@
+<div align="center">
+  <p>
+    🌐
+    <strong><a href="README.md">English</a></strong>
+    &nbsp;｜&nbsp;
+    <strong><a href="README.zh-Hant.md">繁體中文</a></strong>
+    &nbsp;｜&nbsp;
+    <strong><a href="README.zh-Hans.md">简体中文</a></strong>
+    &nbsp;｜&nbsp;
+    <strong><a href="README.ja.md">日本語</a></strong>
+    &nbsp;｜&nbsp;
+    <strong>한국어 ✓</strong>
+  </p>
+
+  <br/>
+
+  <p>
+    <a href="https://hon-lu.github.io/OverTranslate/"><img src="docs/images/ui/btn-site.ko.svg" alt="공식 사이트로 이동" /></a>
+  </p>
+
+  <h1>
+    <img src="docs/images/icon.svg" width="180" alt="OverTranslate Icon"/>
+    <br/>
+    OverTranslate
+  </h1>
+  <p>게임·만화·영상부터 일상적인 사용까지 활용할 수 있는 Windows 화면 번역 도구입니다. 캡처 번역, 실시간 번역 등 다양한 기능을 지원하며, 번역 결과를 원문 위에 그대로 겹쳐 보여 줄 수 있습니다.</p>
+
+  <p>
+    <img src="https://img.shields.io/github/v/release/Hon-Lu/OverTranslate?style=for-the-badge&label=latest%20release" alt="Latest release" />
+    <img src="https://img.shields.io/badge/license-MIT-22C55E?style=for-the-badge" alt="License MIT" />
+    <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Hon-Lu/github-statcards/main/badges/overtranslate-downloads.json" alt="Total downloads" />
+  </p>
+
+  <p>
+    <a href="https://github.com/Hon-Lu/OverTranslate/releases/latest/download/OverTranslate-win-Setup.exe"><img src="docs/images/ui/btn-setup.ko.svg" alt="Windows 설치 버전 다운로드(권장)" /></a>
+    &nbsp;
+    <a href="https://github.com/Hon-Lu/OverTranslate/releases/latest/download/OverTranslate-win-Portable.zip"><img src="docs/images/ui/btn-portable.ko.svg" alt="포터블 버전 다운로드" /></a>
+  </p>
+
+  <p>
+    <img src="docs/images/readme-hero.png" alt="번역 전후 비교 애니메이션: 번역 결과가 원문 위에 겹쳐 표시됩니다" />
+    <br/>
+    <sub>화면 출처: <a href="https://godotengine.org/blog/">Godot Engine Blog</a></sub>
+  </p>
+
+</div>
+
+---
+
+## 번역 기능
+
+OverTranslate은 다섯 가지 번역 기능을 제공하며, 상황에 맞는 것을 바로 고를 수 있습니다.
+
+- **[캡처 번역](#캡처-번역)** — 화면의 영역을 지정하면 글자를 인식해 번역문을 그 자리에 겹쳐 보여 줍니다
+- **[실시간 번역](#실시간-번역)** — 영상, 게임, 만화의 영역을 지정하면 글자를 계속 인식해 번역문을 그 자리에 겹쳐 보여 줍니다
+- **[빠른 조회](#빠른-조회)** — 텍스트를 선택하면 작은 번역 창이 열리며, 고정해 계속 띄워 둘 수도 있습니다
+- **[빠른 번역](#빠른-번역)** — 텍스트를 선택하고 단축키를 누르면 그 자리에서 번역문으로 바뀝니다
+- **[텍스트 번역](#텍스트-번역)** — 입력, 언어 바꾸기, 읽어 주기를 지원하는 전체 번역 창입니다
+
+> 🌐 **OverTranslate는 다국어 인터페이스를 지원합니다. 이 README의 스크린샷은 중국어 번체 또는 영어 화면이지만, 인터페이스 언어는 앱에서 바꿀 수 있습니다.**
+
+---
+
+## 캡처 번역
+
+**메인 창을 닫고 시스템 트레이에 상주할 수 있어서** 평소에 창을 계속 띄워 둘 필요가 없습니다.  
+번역이 필요할 때 단축키(기본 Ctrl + Alt + A)를 누르고 번역할 영역을 지정하면 됩니다.
+> 웹 페이지, PDF, 이미지, 만화, 영상, 게임 화면처럼 글자를 직접 선택할 수 없는 화면에서 쓸 수 있습니다.
+
+![번역 비교](docs/images/翻譯比對圖.png)
+
+| 원문 | 번역 결과 |
+|------|----------|
+| ![캡처 번역0-전](docs/images/截圖翻譯0-前.png) | ![캡처 번역0-후](docs/images/截圖翻譯0-後.png) |
+| ![캡처 번역1-전](docs/images/截圖翻譯1-前.png) | ![캡처 번역1-후](docs/images/截圖翻譯1-後.png) |
+| ![캡처 번역2-전](docs/images/截圖翻譯2-前.png) | ![캡처 번역2-후](docs/images/截圖翻譯2-後.png) |
+
+> 위 번역 비교는 모두 OverTranslate를 실제로 실행한 결과입니다.
+
+> 이미지 출처: 첫 번째 만화의 원본 그림은 AI 생성 이미지, 두 번째 만화는 [こうしす！＠IT支線](https://atmarkit.itmedia.co.jp/ait/articles/2604/02/news010.html), 세 번째는 [Closers 공식 홈페이지](https://www.naddic.co.kr/ko/cls/index)에서 발췌했습니다.
+
+### 툴바 - 그 외 기능
+
+영역 선택을 마친 뒤에는 툴바에서 다음 기능을 쓸 수 있습니다.
+
+- **텍스트 복사:** 인식한 텍스트를 그대로 클립보드에 복사합니다. 번역하지 않아도 됩니다
+- **스크린샷:** 지정한 영역을 클립보드에 복사하며, 설정에서 「스크린샷 저장」을 켜면 이미지 파일로도 저장됩니다
+- **마크업:** 펜 도구로 캡처 위에 바로 표시하고, 그 내용을 스크린샷으로 복사하거나 저장할 수 있습니다
+
+![截圖翻譯-標記.png](docs/images/截圖翻譯-標記.png)
+
+---
+
+## 실시간 번역
+
+**영상 자막이나 게임 화면, 만화**처럼 계속 번역해야 하는 상황에 적합합니다. 번역할 영역을 지정하면 화면 내용을 계속 인식하고,  
+글자가 바뀔 때마다 번역문을 갱신해 원래 위치에 표시합니다.
+
+가져오기 방식은 **전체 화면** 과 **창 지정** 두 가지입니다.  
+전체 화면은 Windows 11 24H2 이상, 창 지정은 Windows 10 1903 이상이 필요합니다.
+
+![실시간 번역 미리 보기](docs/images/即時翻譯視窗預覽_ko.png)
+
+### 번역 블록 모드(영역 선택)
+
+> 실시간 번역 중에는 단축키(기본 Ctrl + Alt + S)로 일시 정지·재개할 수 있습니다.  
+> 번역이 필요 없는 장면이거나 원문을 그대로 보고 싶을 때 잠시 멈췄다가 다시 시작하면 되므로, 실시간 번역을 종료할 필요가 없습니다.
+
+번역 블록에는 여러 가지 모드와 배치 방식이 있습니다.
+#### 자막 / 만화
+영상 자막, 게임 스토리 대사, 만화 글자 등에 적합합니다. 이어서 읽는 문장이 중심이라면 이 모드를 사용하세요.
+
+| 영역 선택 | 번역 결과 |
+|------|----------|
+| ![실시간 번역-만화 영역](docs/images/即時翻譯-漫畫框.png) | ![실시간 번역-만화 번역문](docs/images/即時翻譯-漫畫翻譯.png) |
+| ![실시간 번역1-만화 영역](docs/images/即時翻譯1-漫畫框.png) | ![실시간 번역1-만화 번역문](docs/images/即時翻譯1-漫畫翻譯.png) |
+| ![실시간 번역-영상 영역](docs/images/即時翻譯-影片框.png) | ![실시간 번역-영상 번역문](docs/images/即時翻譯-影片翻譯.png) |
+| ![실시간 번역2-대사 영역](docs/images/即時翻譯2-對話遊戲框.png) | ![실시간 번역2-대사 번역문](docs/images/即時翻譯2-對話遊戲翻譯.png) |
+
+> 위 번역 비교는 모두 OverTranslate를 실제로 실행한 결과입니다.
+
+> 이미지 출처: 첫 번째 만화의 원본 그림은 AI 생성 이미지, 두 번째 4컷 만화는 [@kiyo_mariari](https://x.com/kiyo_mariari/status/2101991547877429535?s=20) 님의 작품, 세 번째 영상은 [BanG Dream! Girls Band Party!☆PICO～OHMORI～](https://www.youtube.com/watch?v=Tsmf4dkigbw), 네 번째 게임 화면은 [《마법소녀의 마녀재판》](https://store.steampowered.com/app/3101040)입니다.
+
+#### 게임 / UI
+게임 화면, 채팅창, 메뉴와 인터페이스 글자 등에 적합합니다. 자막이나 스토리 대사, 만화 글자가 아니라면 이 모드를 사용하세요.
+
+![실시간 번역-채팅 비교](docs/images/即時翻譯-聊天室比對圖.png)
+
+| 영역 선택 | 번역 결과 |
+|------|----------|
+| ![실시간 번역-게임 채팅 영역](docs/images/即時翻譯1-遊戲翻譯框.png) | ![실시간 번역-게임 채팅 번역문](docs/images/即時翻譯1-遊戲翻譯.png) |
+| ![실시간 번역-게임 영역](docs/images/即時翻譯-遊戲翻譯框.png) | ![실시간 번역-게임 번역문](docs/images/即時翻譯-遊戲翻譯.png) |
+
+---
+
+## 빠른 조회
+> 단축키(기본 `Ctrl + Alt + Q`)로 어느 화면에서든 바로 열 수 있습니다.
+
+텍스트를 선택하고 단축키를 누르면 자동으로 불러와 번역합니다. 아무것도 선택하지 않았다면 직접 입력할 수도 있습니다.  
+다른 창으로 전환하면 닫히며, 계속 띄워 두려면 창을 고정하세요.
+
+![빠른 조회](docs/images/選詞翻譯.png)
+
+---
+
+## 빠른 번역
+> 단축키(기본 `Ctrl + Alt + E`). 번역할 때 창이 열리지 않습니다.
+
+텍스트를 선택하고 단축키를 누르면 번역 결과가 그대로 붙여넣어져 원문을 대체합니다(글자를 입력할 수 있는 칸에서만 동작하며, 입력란이 아니면 붙여넣을 수 없습니다).
+
+![빠른 번역](docs/images/快速翻譯.png)
+
+---
+
+## 텍스트 번역
+
+**입력하면 바로 번역**되고, 원본 언어와 번역할 언어를 빠르게 바꿀 수 있습니다.  
+음성 합성(TTS)을 내장해 원문과 번역문 모두 읽어 줍니다.
+
+![텍스트 번역 미리 보기](docs/images/翻譯視窗預覽_ko.png)
+
+---
+
+## 설정
+
+![설정 페이지](docs/images/設定頁_ko.png)
+
+| 설정 항목 | 설명 |
+|----------|------|
+| 인터페이스 언어 | 繁體中文 / 简体中文 / English / 日本語 / 한국어. 바꾸면 곧바로 반영됩니다(첫 실행 시에는 Windows 표시 언어를 따릅니다) |
+| 캡처 번역(단축키) | 영역을 지정하면 그대로 번역합니다(기본 `Ctrl + Alt + A`) |
+| 번역 창 열기(단축키) | 메인 창을 마지막에 보던 페이지로 불러옵니다(기본 `Ctrl + Alt + W`). 실시간 번역 중에는 플로팅 바를 맨 앞으로 옮깁니다 |
+| 일시 정지 / 재개(단축키) | **실시간 번역** 을 일시 정지·재개합니다(기본 `Ctrl + Alt + S`). 멈춰 있는 동안 원문을 확인할 수 있습니다 |
+| 빠른 조회(단축키) | **빠른 조회** 창을 엽니다(기본 `Ctrl + Alt + Q`). 선택해 둔 텍스트는 자동으로 불러옵니다 |
+| 빠른 번역(단축키) | 선택한 텍스트를 번역 결과로 바꿉니다(기본 `Ctrl + Alt + E`). 원본·번역 언어를 따로 설정할 수 있습니다 |
+| 자동 번역 | 캡처 영역을 다 지정하면 곧바로 번역해, 따로 누를 필요가 없습니다(기본은 꺼짐) |
+| 시작 프로그램 | Windows 시작 시 자동으로 실행합니다 |
+| 스크린샷 저장 | 캡처할 때마다 자동으로 저장하며, 저장 위치를 고를 수 있습니다(기본은 꺼짐) |
+| 번역 서비스 설정 | DeepL과 OpenAI의 키·주소·모델을 설정합니다. 나머지 서비스는 설정이 필요하지 않습니다 |
+| 테마 | 라이트 / 다크 |
+| 앱 로그 | 앱의 동작을 더 자세히 기록합니다. 문제를 확인할 때만 켜는 것을 권장합니다(기본은 꺼짐) |
+| 디버그 도구 | **캡처 번역** 결과 위에 OCR 인식 상자와 텍스트 그룹 상자를 겹쳐 보여 줍니다(기본은 꺼짐) |
+
+> 단축키는 조합키뿐 아니라 단독 키(F1 ~ F24, Pause, Scroll Lock), 마우스 가운데／옆 버튼, 게임패드 버튼으로도 지정할 수 있습니다.
+
+> 로그는 내 PC에만 저장되며 자동으로 전송되지 않습니다. **자세한 정보 기록** 을 켰을 때 기록되는 내용도 마찬가지로 PC 안에만 남습니다. 문제를 신고할 때는 설정 페이지에서 **진단 정보 내보내기** 와 **업로드** 를 누르세요.
+
+---
+
+### 번역 API
+
+> DeepL과 OpenAI를 제외하면, 내려받은 뒤 바로 사용할 수 있습니다.
+
+| 서비스 | 설명 |
+|------|------|
+| Google 번역 (표준) | Google 번역 웹사이트와 같은 번역 결과이며 응답이 안정적임 |
+| Google 번역 (Google2) | 완전한 문장은 더 자연스럽게 번역되지만, 인명이나 작품명이 의역되거나 생략될 수 있음 |
+| Google RPC | batchexecute |
+| Bing 번역 | 번역 품질이 좋음(공식 번역에서 LLM으로 의미를 다듬을 수 있어 번역할 때마다 표현이 조금씩 다를 수 있음) |
+| Microsoft 번역 | **(기본)** 안정적이고 응답이 빠름 |
+| DeepL | DeepL 공식 사이트에서 가입해 API 키를 받아야 합니다 |
+| OpenAI | OpenAI API 호환 형식을 지원합니다. 로컬 LLM 사용을 권장하며 [Ollama](docs/guides/OLLAMA_GUIDE.ko.md)로 간편하게 설치할 수 있습니다 |
+
+선택한 엔진만 사용합니다. 요청이 실패하면 자동 재시도나 다른 서비스로 전환하지 않고 오류를 표시합니다. 성공한 응답에 혼합 언어의 미번역 부분이 있으면 보완합니다.
+
+### OpenAI 설정
+
+![OpenAI](docs/images/OpenAI.png)
+
+| 항목 | 설명 |
+|------|------|
+| API 주소 | 비워 두면 `http://localhost:11434/v1`(Ollama의 로컬 기본 주소)를 사용합니다 |
+| API 키 | 로컬 실행이면 비워 두어도 됩니다 |
+| 모델 설정 | 설정 하나 = 모델 이름 + 고급 매개변수 + **자동** 과 **언어 지정** 각각의 System / User 프롬프트. 설정을 바꾸면 한 묶음으로 바뀝니다 |
+| 권장 설정 | 읽기 전용인 설정. [Ollama 설치 안내](docs/guides/OLLAMA_GUIDE.ko.md)가 권장하는 모델을 사용하며 프롬프트는 인터페이스 언어에 따라 바뀝니다 |
+| 추가 | 최대 5개. 모델 이름은 필수이고 System / User 프롬프트는 둘 중 하나만 채우면 됩니다 |
+| 고급 매개변수 | 편집 화면의 **고급** 에 있습니다. 세 가지 모두 개별로 끌 수 있고, 꺼 둔 것은 전송되지 않습니다 |
+
+고급 매개변수:
+
+| 매개변수 | 설명 | 범위 | 기본값 |
+|----------|------|------|--------|
+| Temperature | 확률이 높은 결과를 얼마나 선호할지. 값이 높을수록 다른 표현이 선택될 여지가 커집니다 | 0.0 ~ 2.0 | 0.7 |
+| Top P | 모델이 고를 수 있는 후보의 범위. 값이 낮을수록 확률이 높은 소수의 후보만 남습니다 | 0.0 ~ 1.0 | 0.6 |
+| Seed | 결과를 재현하기 쉽게 합니다. 모델과 프롬프트, 그 밖의 설정이 같다면 같은 Seed로 같은 결과가 나오는 경우가 많습니다 | 정수 | 42 |
+
+프롬프트에서 사용할 수 있는 매개변수(설정 페이지의 **사용할 수 있는 매개변수** 에도 설명과 예가 있습니다):
+
+| 매개변수 | 설명 | 예 |
+|------|------|------|
+| `{source_name}` | 원본 언어 이름 | 영어 |
+| `{source_code}` | 원본 언어 코드 | en |
+| `{target_name}` | 번역할 언어 이름 | 일본어 |
+| `{target_code}` | 번역할 언어 코드 | ja |
+
+> 언어 이름은 인터페이스 언어를 따릅니다(한국어 화면이면 「일본어」, English 화면이면 「Japanese」). 언어 코드는 모델이 사용하는 태그로 고정입니다.
+
+### 다국어 OCR 인식
+
+OCR 인식은 RapidOcrNet과 ONNX 모델로 처리하며, 언어에 따라 알맞은 모델이 자동으로 사용됩니다. OCR 엔진을 직접 고를 필요는 없습니다.
+
+| 인식 언어 | 인식 모델(rec) |
+|----------|----------------|
+| **영어 / 중국어(간체·번체) / 일본어** | PP-OCRv6 범용 인식 모델(`PP-OCRv6_small_rec`). 하나의 모델로 중국어·영어·일본어와 여러 라틴 문자를 지원하며, 흔한 중영 혼용도 처리합니다 |
+| **한국어** | PP-OCRv5 한국어 인식 모델(`korean_PP-OCRv5_rec`). PP-OCRv6 범용 모델이 다루지 않는 한글을 보완합니다 |
+
+**문자 검출 모델**(`PP-OCRv6_det_tiny`)과 **방향 분류 모델**(`cls`)은 모든 언어가 공유하며, 언어에 따라 바뀌는 것은 인식 모델뿐입니다.  
+OCR은 처음부터 끝까지 내 PC에서 실행되며, 이미지를 외부 서비스로 보내지 않습니다. 기본 모델은 CPU에서, 만화 세로쓰기 모델은 그래픽 카드에서 실행됩니다.
+
+---
+
+## 시스템 요구 사항
+
+- **운영체제**: Windows 10 / 11
+- **실행 환경**: 필요한 구성 요소가 설치 파일에 포함되어 있어 .NET 런타임을 따로 설치할 필요가 없습니다
+
+다음 번역 서비스를 사용하려면 별도로 준비해야 합니다.
+
+- **DeepL**: [DeepL 공식 사이트](https://www.deepl.com/pro-api)에서 API 키를 발급받으세요
+- **OpenAI**: OpenAI API 호환 서비스를 직접 준비해야 합니다. 로컬 LLM 구축 방법은 [Ollama 설치 안내](docs/guides/OLLAMA_GUIDE.ko.md)를 참고하세요
+
+---
+
+## ☕ 프로젝트 후원
+
+OverTranslate는 무료로 제공되는 Windows 번역 도구입니다.  
+이 프로젝트가 도움이 되었다면 [Buy Me a Coffee](https://buymeacoffee.com/hon.lu)에서 커피 한 잔 사 주시면 이후 개발과 유지 보수에 큰 힘이 됩니다.
+
+<p align="center">
+  <a href="https://github.com/Hon-Lu/github-statcards"><img src="https://raw.githubusercontent.com/Hon-Lu/github-statcards/main/cards/overtranslate-downloads-history.svg" alt="누적 다운로드 수와 일별 증가" /></a>
+</p>
+
+---
+
+## 라이선스
+
+이 프로젝트는 [MIT License](https://opensource.org/license/mit)를 따릅니다.  
+자유롭게 사용·수정·배포할 수 있으며 상업적 용도로도 사용할 수 있습니다. 주요 조건은 복제하거나 배포할 때 원본 저작권 고지와 MIT 라이선스 조항을 유지하는 것입니다.  
+전문은 [LICENSE](LICENSE)에서 확인할 수 있습니다.

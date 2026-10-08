@@ -2,10 +2,8 @@ using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using OpenCvSharp;
+using OverTranslate.Imaging;
 using OverTranslate.Services.Realtime;
-using CvRect = OpenCvSharp.Rect;
-using CvSize = OpenCvSharp.Size;
 using MediaColor = System.Windows.Media.Color;
 using WpfRect = System.Windows.Rect;
 
@@ -165,6 +163,28 @@ internal sealed class CaptureBubbleBackdrop
         try
         {
             using var repaired = RealtimeCpuBackground.Repair(frame, blocks, token);
+            return FromRepaired(repaired);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception)
+        {
+            // Never the reason a translation fails to appear: the flat colour is still a bubble.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// A backdrop over a frame the source text has already been repaired out of.
+    /// </summary>
+    /// <remarks>
+    /// For the realtime overlay, which repairs its frame anyway for its own patches: the plates are
+    /// cut from that same repair rather than a second one. Null when the pixels cannot be read.
+    /// </remarks>
+    public static CaptureBubbleBackdrop? FromRepaired(Bitmap repaired)
+    {
+        if (repaired.Width <= 0 || repaired.Height <= 0) return null;
+        try
+        {
             var bgr = new byte[repaired.Width * repaired.Height * 3];
             var data = repaired.LockBits(new Rectangle(0, 0, repaired.Width, repaired.Height),
                 System.Drawing.Imaging.ImageLockMode.ReadOnly,
@@ -179,10 +199,8 @@ internal sealed class CaptureBubbleBackdrop
 
             return new CaptureBubbleBackdrop(bgr, repaired.Width, repaired.Height);
         }
-        catch (OperationCanceledException) { throw; }
         catch (Exception)
         {
-            // Never the reason a translation fails to appear: the flat colour is still a bubble.
             return null;
         }
     }
@@ -214,7 +232,7 @@ internal sealed class CaptureBubbleBackdrop
     }
 
     /// <summary>The most common colour in an area of the repair.</summary>
-    private MediaColor? Dominant(CvRect area)
+    private MediaColor? Dominant(Rectangle area)
     {
         var vote = new DominantColorVote();
         int step = Math.Max(1, (int)Math.Ceiling(Math.Sqrt((double)area.Width * area.Height / 4096)));
@@ -313,8 +331,16 @@ internal sealed class CaptureBubbleBackdrop
     /// read: a subtitle line over a dark scrim used to be darkened further because the bright
     /// scenery above and below the line was being counted as background for it.
     /// </param>
+    /// <param name="shape">
+    /// The bubble's own outline, as polygons in the captured frame's pixels, for a bubble that is
+    /// not the upright rectangle inside <paramref name="area"/> — a group off a tilted card (see
+    /// <see cref="Ocr.TiltedText"/>). The plate then fades out over the feather beyond that outline
+    /// rather than beyond the rectangle, and only what lies inside it chooses the text colour. Null
+    /// for every other bubble, which is made exactly as before.
+    /// </param>
     public CaptureBubblePlate? Plate(
-        WpfRect area, MediaColor wash, MediaColor text, double glyphHeight, double writtenHeight)
+        WpfRect area, MediaColor wash, MediaColor text, double glyphHeight, double writtenHeight,
+        IReadOnlyList<System.Windows.Point[]>? shape = null)
     {
         var requested = Round(area);
         if (requested.Width < 2 || requested.Height < 2) return null;
@@ -328,36 +354,35 @@ internal sealed class CaptureBubbleBackdrop
 
         double sigma = Math.Clamp(glyphHeight * BlurFactor, 1, 16);
         int pad = (int)Math.Ceiling(sigma * 3);
-        var work = Clip(new CvRect(rect.X - pad, rect.Y - pad, rect.Width + pad * 2, rect.Height + pad * 2));
+        var work = Clip(new Rectangle(rect.X - pad, rect.Y - pad, rect.Width + pad * 2, rect.Height + pad * 2));
 
         try
         {
             using var source = Read(work);
-            using var blurred = new Mat();
-            Cv2.GaussianBlur(source, blurred, new CvSize(0, 0), sigma, borderType: BorderTypes.Replicate);
+            using var blurred = Filters.GaussianBlur(source, sigma);
 
             // Padded back out to the size that was asked for. A bubble at the edge of the
             // selection has part of its plate outside the capture, and the brush is stretched onto
             // the element it fills: an image returned short would stretch the opaque middle off
             // the text and squash the ramp that is the whole point of the extra margin.
-            using var cropped = new Mat(blurred,
-                new CvRect(rect.X - work.X, rect.Y - work.Y, rect.Width, rect.Height));
-            using var plate = new Mat();
-            Cv2.CopyMakeBorder(cropped, plate,
+            using var cropped = new ImageBuffer(blurred,
+                new Rectangle(rect.X - work.X, rect.Y - work.Y, rect.Width, rect.Height));
+            using var plate = Channels.PadReplicate(cropped,
                 rect.Y - requested.Y, requested.Bottom - rect.Bottom,
-                rect.X - requested.X, requested.Right - rect.Right, BorderTypes.Replicate);
+                rect.X - requested.X, requested.Right - rect.Right);
             if (WashOpacity > 0)
             {
-                using var tint = new Mat(plate.Size(), MatType.CV_8UC3, new Scalar(wash.B, wash.G, wash.R));
-                Cv2.AddWeighted(plate, 1 - WashOpacity, tint, WashOpacity, 0, plate);
+                using var tint = ImageBuffer.Solid(plate.Size, wash.B, wash.G, wash.R);
+                Arithmetic.AddWeighted(plate, 1 - WashOpacity, tint, WashOpacity, 0, plate);
             }
 
             // Move the text before moving the plate. Lightening or darkening one colour costs
             // the picture nothing; washing the whole plate toward black or white costs exactly
             // what this class exists to preserve, so it is the fallback and not the first answer.
             int ring = (int)Math.Round(Feather(glyphHeight));
-            var palette = Palette(plate, ring,
-                Math.Max(ring, (int)Math.Round((plate.Height - writtenHeight) / 2)));
+            var palette = shape is null
+                ? Palette(plate, ring, Math.Max(ring, (int)Math.Round((plate.Height - writtenHeight) / 2)))
+                : ShapePalette(plate, requested.X, requested.Y, shape);
 
             var legible = Legible(palette, text, ComfortableContrast);
             if (!Clears(palette, legible, Colors.Black, 0, PlateContrast))
@@ -381,13 +406,16 @@ internal sealed class CaptureBubbleBackdrop
                 var target = OverlayTextColor.EnsureContrast(Dominant(palette), text, ComfortableContrast);
                 double lift = Lift(palette, text, target);
 
-                using var solid = new Mat(plate.Size(), MatType.CV_8UC3, new Scalar(target.B, target.G, target.R));
-                Cv2.AddWeighted(plate, 1 - lift, solid, lift, 0, plate);
+                using var solid = ImageBuffer.Solid(plate.Size, target.B, target.G, target.R);
+                Arithmetic.AddWeighted(plate, 1 - lift, solid, lift, 0, plate);
                 legible = Legible([.. palette.Select(colour => Mix(colour, target, lift))],
                     text, ComfortableContrast);
             }
 
-            var brush = new ImageBrush(Fade(plate, Feather(glyphHeight))) { Stretch = Stretch.Fill };
+            var faded = shape is null
+                ? Fade(plate, Feather(glyphHeight))
+                : Fade(plate, Feather(glyphHeight), requested.X, requested.Y, shape);
+            var brush = new ImageBrush(faded) { Stretch = Stretch.Fill };
             brush.Freeze();
             return new CaptureBubblePlate(brush, legible);
         }
@@ -408,30 +436,52 @@ internal sealed class CaptureBubbleBackdrop
     /// business darkening the whole plate to stay legible under text that is not on it.
     /// </param>
     /// <param name="insetY">The same, plus the empty part of a bubble above and below its text.</param>
-    private static MediaColor[] Palette(Mat plate, int insetX, int insetY)
+    private static unsafe MediaColor[] Palette(ImageBuffer plate, int insetX, int insetY)
     {
         int marginX = Math.Max(0, Math.Min(insetX, plate.Width / 2 - 1));
         int marginY = Math.Max(0, Math.Min(insetY, plate.Height / 2 - 1));
         using var written = marginX > 0 || marginY > 0
-            ? new Mat(plate, new CvRect(marginX, marginY,
+            ? new ImageBuffer(plate, new Rectangle(marginX, marginY,
                 plate.Width - marginX * 2, plate.Height - marginY * 2))
             : plate.Clone();
-        using var sample = new Mat();
         // Nearest, not area: this palette exists to find the part of the plate the text reads
         // worst on, and averaging neighbours together is precisely how an extreme goes missing.
-        Cv2.Resize(written, sample, new CvSize(
+        using var sample = Resize.To(written, new Size(
             Math.Clamp(written.Width / 6, 12, 48), Math.Clamp(written.Height / 4, 6, 16)),
-            interpolation: InterpolationFlags.Nearest);
+            Interpolation.Nearest);
 
-        var colours = new MediaColor[sample.Rows * sample.Cols];
-        var row = new byte[sample.Cols * 3];
-        for (int y = 0; y < sample.Rows; y++)
+        var colours = new MediaColor[sample.Height * sample.Width];
+        for (int y = 0; y < sample.Height; y++)
         {
-            Marshal.Copy(sample.Ptr(y), row, 0, row.Length);
-            for (int x = 0; x < sample.Cols; x++)
-                colours[y * sample.Cols + x] = MediaColor.FromRgb(row[x * 3 + 2], row[x * 3 + 1], row[x * 3]);
+            byte* row = sample.Row(y);
+            for (int x = 0; x < sample.Width; x++)
+                colours[y * sample.Width + x] = MediaColor.FromRgb(row[x * 3 + 2], row[x * 3 + 1], row[x * 3]);
         }
         return colours;
+    }
+
+    /// <summary>
+    /// The colours of the part of the plate inside <paramref name="shape"/>, which is where the
+    /// text is written. <paramref name="left"/> and <paramref name="top"/> are where the plate's
+    /// first pixel lies in the frame.
+    /// </summary>
+    private static unsafe MediaColor[] ShapePalette(
+        ImageBuffer plate, int left, int top, IReadOnlyList<System.Windows.Point[]> shape)
+    {
+        int stepX = Math.Max(1, plate.Width / 48);
+        int stepY = Math.Max(1, plate.Height / 16);
+        var colours = new List<MediaColor>();
+        for (int y = stepY / 2; y < plate.Height; y += stepY)
+        {
+            byte* row = plate.Row(y);
+            for (int x = stepX / 2; x < plate.Width; x += stepX)
+            {
+                if (!shape.Any(polygon => Ocr.TiltedText.Inside(polygon, left + x + .5, top + y + .5))) continue;
+                colours.Add(MediaColor.FromRgb(row[x * 3 + 2], row[x * 3 + 1], row[x * 3]));
+            }
+        }
+        // A shape too thin for the grid to land in: the whole plate, rather than nothing.
+        return colours.Count > 0 ? [.. colours] : Palette(plate, 0, 0);
     }
 
     /// <summary>
@@ -498,17 +548,16 @@ internal sealed class CaptureBubbleBackdrop
         (byte)Math.Round(from.B + (to.B - from.B) * amount));
 
     /// <summary>The plate as a bitmap whose outermost <paramref name="feather"/> pixels fade out.</summary>
-    private static BitmapSource Fade(Mat plate, double feather)
+    private static unsafe BitmapSource Fade(ImageBuffer plate, double feather)
     {
         int width = plate.Width;
         int height = plate.Height;
         int ramp = (int)Math.Round(feather);
         var pixels = new byte[width * height * 4];
-        var row = new byte[width * 3];
 
         for (int y = 0; y < height; y++)
         {
-            Marshal.Copy(plate.Ptr(y), row, 0, row.Length);
+            byte* row = plate.Row(y);
             for (int x = 0; x < width; x++)
             {
                 int i = (y * width + x) * 4;
@@ -525,6 +574,40 @@ internal sealed class CaptureBubbleBackdrop
     }
 
     /// <summary>
+    /// The plate as a bitmap that is opaque inside <paramref name="shape"/> and fades out over
+    /// <paramref name="feather"/> pixels beyond it, by the same smoothstep as the rectangular one.
+    /// </summary>
+    private static unsafe BitmapSource Fade(
+        ImageBuffer plate, double feather, int left, int top, IReadOnlyList<System.Windows.Point[]> shape)
+    {
+        int width = plate.Width;
+        int height = plate.Height;
+        var pixels = new byte[width * height * 4];
+
+        for (int y = 0; y < height; y++)
+        {
+            byte* row = plate.Row(y);
+            for (int x = 0; x < width; x++)
+            {
+                int i = (y * width + x) * 4;
+                pixels[i] = row[x * 3];
+                pixels[i + 1] = row[x * 3 + 1];
+                pixels[i + 2] = row[x * 3 + 2];
+                double depth = shape.Max(polygon => Ocr.TiltedText.Depth(polygon, left + x + .5, top + y + .5));
+                pixels[i + 3] = depth >= 0 ? (byte)255
+                    : feather <= 0 || -depth >= feather ? (byte)0
+                    : Smoothstep((feather + depth) / feather);
+            }
+        }
+
+        var image = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, pixels, width * 4);
+        image.Freeze();
+        return image;
+    }
+
+    private static byte Smoothstep(double t) => (byte)Math.Round(255 * t * t * (3 - 2 * t));
+
+    /// <summary>
     /// Smoothstep rather than a straight ramp: a linear fade leaves a visible crease where it
     /// meets the opaque middle, which is the very line this exists to remove.
     /// </summary>
@@ -538,36 +621,32 @@ internal sealed class CaptureBubbleBackdrop
     }
 
     /// <summary>The requested area on the pixel grid, whether or not the capture reaches it.</summary>
-    private static CvRect Round(WpfRect area)
+    private static Rectangle Round(WpfRect area)
     {
         if (!double.IsFinite(area.X + area.Y + area.Width + area.Height)
             || Math.Abs(area.X) > 1e6 || Math.Abs(area.Y) > 1e6
             || area.Width > 1e6 || area.Height > 1e6) return default;
         int left = (int)Math.Floor(area.X);
         int top = (int)Math.Floor(area.Y);
-        return new CvRect(left, top,
+        return new Rectangle(left, top,
             (int)Math.Ceiling(area.Right) - left, (int)Math.Ceiling(area.Bottom) - top);
     }
 
-    private CvRect Clip(CvRect area)
+    private Rectangle Clip(Rectangle area)
     {
         int left = Math.Clamp(area.X, 0, _width);
         int top = Math.Clamp(area.Y, 0, _height);
-        return new CvRect(left, top,
+        return new Rectangle(left, top,
             Math.Clamp(area.Right, left, _width) - left,
             Math.Clamp(area.Bottom, top, _height) - top);
     }
 
-    private Mat Read(CvRect area)
+    private ImageBuffer Read(Rectangle area)
     {
-        var mat = new Mat(area.Height, area.Width, MatType.CV_8UC3);
-        try
-        {
-            int stride = _width * 3;
-            for (int y = 0; y < area.Height; y++)
-                Marshal.Copy(_bgr, (area.Y + y) * stride + area.X * 3, mat.Ptr(y), area.Width * 3);
-            return mat;
-        }
-        catch { mat.Dispose(); throw; }
+        var image = ImageBuffer.Uninitialized(area.Width, area.Height, PixelType.U8C3);
+        int stride = _width * 3;
+        for (int y = 0; y < area.Height; y++)
+            _bgr.AsSpan((area.Y + y) * stride + area.X * 3, area.Width * 3).CopyTo(image.RowSpan(y));
+        return image;
     }
 }

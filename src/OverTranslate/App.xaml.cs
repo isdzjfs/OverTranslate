@@ -22,8 +22,11 @@ public partial class App
     [STAThread]
     private static void Main(string[] args)
     {
+        // Uninstalling takes everything the app wrote with it — settings, logs, models — and the
+        // sign-in entry. Runs in a process of its own that exits straight after; see UninstallCleanup.
         VelopackApp.Build()
             .SetAutoApplyOnStartup(false)
+            .OnBeforeUninstallFastCallback(_ => UninstallCleanup.Run())
             .Run();
 
         var app = new App();
@@ -93,12 +96,21 @@ public partial class App
         base.OnStartup(e);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
+        // Past the single-instance check for the reason given below, and before any window: the
+        // card and the hints read the switch this puts in step.
+        MangaModelOptions.Attach();
+
         var mainWindow = new MainWindow();
         MainWindow = mainWindow;
         mainWindow.InitializeApp();
 
         UpdateNotifier.StartPolling();
         _ = PromptForUpdateAsync();
+
+        // A manga model download the app was closed in the middle of is not kept. Here, past the
+        // single-instance check, rather than when the store is built: a second launch must not clear
+        // the folder the running instance is downloading into.
+        _ = Task.Run(AppServices.MangaModels.DiscardIncomplete);
     }
 
     /// <summary>

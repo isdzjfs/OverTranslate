@@ -16,6 +16,8 @@ using OverTranslate.Views.Shell;
 using Button = System.Windows.Controls.Button;
 using Clipboard = System.Windows.Clipboard;
 using ComboBox = System.Windows.Controls.ComboBox;
+using DataFormats = System.Windows.DataFormats;
+using DataObject = System.Windows.DataObject;
 using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 using Point = System.Windows.Point;
@@ -453,7 +455,7 @@ public partial class QuickLookupWindow : Window
     /// Drops the popup around the pointer, inside the monitor the pointer is on.
     /// </summary>
     /// <remarks>
-    /// All physical pixels and the scale of the monitor being placed on, exactly as the toast does:
+    /// All physical pixels and the scale of the monitor being placed on, exactly as the capture toolbar does:
     /// reading the scale off this window reports the monitor it currently sits on, which before the
     /// first placement is whichever one WPF happened to open it on.
     ///
@@ -950,6 +952,30 @@ public partial class QuickLookupWindow : Window
         RequestTranslate();
     }
 
+    /// <remarks>
+    /// A single-line TextBox keeps a pasted text only up to its first line break, so text copied by
+    /// hand across lines lost everything after the first (#274). It is folded onto one line the way
+    /// a carried-in selection is — see <see cref="SelectedTextReader.Sanitize"/> for why the breaks
+    /// do not belong to the sentence — but not capped, see <see cref="SelectedTextReader.Fold"/>.
+    /// Text without a line break is pasted as it came.
+    /// </remarks>
+    private void SourceTextBox_Pasting(object sender, DataObjectPastingEventArgs e)
+    {
+        if (e.DataObject.GetData(DataFormats.UnicodeText) is not string pasted
+            || pasted.IndexOfAny(['\r', '\n']) < 0)
+            return;
+
+        var folded = SelectedTextReader.Fold(pasted);
+        if (folded.Length == 0)
+        {
+            e.CancelCommand();
+            return;
+        }
+
+        e.DataObject = new DataObject(DataFormats.UnicodeText, folded);
+        e.FormatToApply = DataFormats.UnicodeText;
+    }
+
     private void RequestTranslate()
     {
         if (_suppressAuto) return;
@@ -1020,7 +1046,7 @@ public partial class QuickLookupWindow : Window
             // actually was. Where the two disagree about which way this should have gone, the round
             // trip is spent again rather than showing the answer to the wrong question — the result
             // has not been put on screen yet, so nothing flickers; the spinner simply runs longer.
-            if (bilingual)
+            if (bilingual && !results.Any(block => block.Untranslated))
             {
                 var corrected = CorrectedBilingualTarget(detected, tgtLang);
                 if (corrected is not null)
@@ -1036,6 +1062,12 @@ public partial class QuickLookupWindow : Window
             SetTranslationLoading(false);
             _detectedLang = detected ?? "";
             TranslatedText.Text = results.FirstOrDefault()?.TranslatedText ?? "";
+            if (results.Any(block => block.Untranslated))
+            {
+                ShowResult();
+                ShowStatus(LocalizationService.Get("S.Error.NotTranslated"), isError: true);
+                return;
+            }
             if (settings.QuickLookup.AutoCopyTranslation)
                 CopyTranslation(showConfirmation: false);
             StatusText.Visibility = Visibility.Collapsed;

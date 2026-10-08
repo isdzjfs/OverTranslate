@@ -96,6 +96,15 @@ internal sealed class RealtimeSessionController
     // of its frames — see RefreshOverlayHandles. Written on the UI thread, read on the polling one.
     private IReadOnlyList<IntPtr> _overlayHandles = [];
     private List<RealtimeBlockPlacement> _blocks = [];
+    // What each block window is showing, by region id, so 對照顯示 can be switched mid-session by
+    // building the windows again in their new places and putting the same words back — see
+    // ToggleCompareDisplay. Cleared with the screen on 暫停, for the same reason the windows are.
+    private readonly Dictionary<int, IReadOnlyList<TranslatedBlock>> _shownLines = [];
+
+    // 對照顯示, read from the settings file when the session starts and written back on every press.
+    // Held here as well because the press has to reach whichever layers are up at the time.
+    private bool _compareDisplay;
+
     // UI updates are dispatched asynchronously. Carrying the session's generation here prevents an
     // update queued before a pause from restoring text after the screen was cleared.
     private int _visibleGeneration;
@@ -137,15 +146,68 @@ internal sealed class RealtimeSessionController
     /// </remarks>
     private readonly DispatcherTimer _stayOnTop = new() { Interval = TimeSpan.FromSeconds(1) };
 
+    // Diagnostics for an edit layer seen stuck under the capture source and never reproduced: when
+    // the timer last ran (cleared wherever it is stopped, so a pause is not read as a stall), and
+    // what was last found above the layer — logged only when that changes.
+    private long _lastStayOnTopTick;
+    private IntPtr _editCoveredBy;
+
     private RealtimeSessionController()
     {
         _stayOnTop.Tick += (_, _) =>
         {
+            LogStayOnTopStall();
+
             // The control bar last, so it ends up above the block layers it may overlap.
             foreach (var block in _blockWindows.Values) AlwaysOnTop.Reassert(block);
             if (_edit is { } edit) AlwaysOnTop.Reassert(edit);
             if (_control is { } control) AlwaysOnTop.Reassert(control);
+
+            // Every tooltip after every window: the control bar is owned by the edit layer, and
+            // raising it brings the layer up too — over any tooltip of the layer's raised before it.
+            if (_edit is { } editTips) AlwaysOnTop.ReassertToolTips(editTips);
+            if (_control is { } controlTips) AlwaysOnTop.ReassertToolTips(controlTips);
+
+            LogEditLayerCovered();
         };
+    }
+
+    /// <summary>
+    /// Warns when a tick arrives long after the one before: the timer is a dispatcher timer, so a
+    /// gap means the UI thread was busy — and nothing was holding the layers on top meanwhile.
+    /// </summary>
+    private void LogStayOnTopStall()
+    {
+        long now = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (_lastStayOnTopTick != 0)
+        {
+            var gap = System.Diagnostics.Stopwatch.GetElapsedTime(_lastStayOnTopTick, now);
+            if (gap > TimeSpan.FromSeconds(3))
+                Log.Warn("Realtime stay-on-top timer ticked {Gap:F1}s after the previous tick; the UI thread was blocked",
+                    gap.TotalSeconds);
+        }
+        _lastStayOnTopTick = now;
+    }
+
+    /// <summary>
+    /// Checks, right after the layer was put back on top, whether another application's window is
+    /// still above it — which would mean the re-assert did not take, or that window is topmost too.
+    /// </summary>
+    private void LogEditLayerCovered()
+    {
+        var edit = _edit is { } window ? new System.Windows.Interop.WindowInteropHelper(window).Handle : IntPtr.Zero;
+        var cover = edit == IntPtr.Zero ? null : WindowZOrderDiagnostics.FindForeignWindowAbove(edit);
+        var coveredBy = cover?.Hwnd ?? IntPtr.Zero;
+        if (coveredBy == _editCoveredBy) return;
+
+        if (cover is { } c)
+            Log.Warn(
+                "Realtime edit layer is under hwnd={Hwnd:X} class={Class} process={Process} exstyle={ExStyle:X8} topmost={Topmost}; edit exstyle={EditExStyle:X8}",
+                c.Hwnd, c.ClassName, c.ProcessName, c.ExStyle, c.IsTopmost, WindowZOrderDiagnostics.ExStyle(edit));
+        else if (edit != IntPtr.Zero)
+            Log.Info("Realtime edit layer is no longer under hwnd={Hwnd:X}", _editCoveredBy);
+
+        _editCoveredBy = coveredBy;
     }
 
     /// <summary>Raised when the session starts or ends, so the page can re-render its controls.</summary>
@@ -191,6 +253,7 @@ internal sealed class RealtimeSessionController
             : [];
         _hiddenShell = shellToHide;
         _hiddenShell?.Hide();
+        _compareDisplay = SettingsService.Instance.Current.Realtime.CompareDisplay;
 
         // The same two engines the capture side uses — see AppServices. There is no fallback to get
         // wrong any more: nothing here has to find a window first, so there is no path on which a
@@ -214,6 +277,10 @@ internal sealed class RealtimeSessionController
         // and would stack a fresh handler each time. The layer it talks to is whichever one is up:
         // there is none while translating, and the button that raises this is not on screen then.
         control.CrosshairToggleRequested += (_, enabled) => _edit?.SetCrosshairEnabled(enabled);
+        // Wired once for the same reason, and unlike the crosshair it is live in both modes — the
+        // button is on the bar and on the capsule, and both are this one state.
+        control.CompareDisplayToggleRequested += (_, _) => ToggleCompareDisplay();
+        control.SetCompareDisplay(_compareDisplay);
         _control = control;
         control.Show();
         RefreshOverlayHandles();
@@ -291,6 +358,7 @@ internal sealed class RealtimeSessionController
         // OnRegionUpdated refuses to put them back.
         foreach (var window in _blockWindows.Values)
             window.SetLines([]);
+        _shownLines.Clear();
 
         control.SetPaused(true);
         return true;
@@ -352,6 +420,7 @@ internal sealed class RealtimeSessionController
         // Nothing to keep on top while the layers are away, and a tick that fired mid-capture would
         // be re-asserting them over the window that asked them to leave.
         _stayOnTop.Stop();
+        _lastStayOnTopTick = 0;
 
         // One wait for the composition rather than one per window: they go together, and the user is
         // holding a shortcut waiting for the screen to freeze.
@@ -412,6 +481,7 @@ internal sealed class RealtimeSessionController
         Log.Info("Realtime session ending");
 
         _stayOnTop.Stop();
+        _lastStayOnTopTick = 0;
         DisposeEscapeHook();
 
         if (_session != null)
@@ -493,7 +563,8 @@ internal sealed class RealtimeSessionController
             request.ScreenBounds, _blocks, request.MaxBlocks,
             settings.Current.Realtime.GuidanceExpanded,
             settings.Current.Realtime.BlockMode,
-            settings.Current.Realtime.TextOrientation);
+            settings.Current.Realtime.TextOrientation,
+            _compareDisplay);
         edit.BlocksChanged += (_, _) =>
         {
             _blocks = [.. edit.GetPhysicalBlocks()];
@@ -559,22 +630,9 @@ internal sealed class RealtimeSessionController
         DisposeEscapeHook();
         CloseEditWindow();
 
-        var regions = _blocks
-            .Select((block, index) =>
-                new RealtimeRegion(index, block.Bounds, block.Mode, block.Orientation))
-            .ToList();
+        var regions = Regions();
 
-        // Resolved before the overlays are shown. They are click-through and belong to this process,
-        foreach (var region in regions)
-        {
-            var window = new RealtimeBlockWindow(
-                region.Id, region.Bounds, GrabUnderlying, request.SourceLanguage, request.TargetLanguage,
-                request.TextColor, request.ScrimColor, request.ScrimOpacity,
-                request.NaturalBackground, request.SampleSourceTextColor, region.Mode,
-                request.Border, request.FixedBorderColor, region.Orientation);
-            _blockWindows[region.Id] = window;
-            window.Show();
-        }
+        ShowBlockWindows(request, regions);
 
         // Before the backend, which asks for this list as it starts: the overlays are up, and the
         // first frame it accepts must already be composed without them.
@@ -605,6 +663,125 @@ internal sealed class RealtimeSessionController
         _stayOnTop.Start();
 
         _session.Start(regions, request.SourceLanguage, request.TargetLanguage, request.Provider, capture);
+    }
+
+    // Ids are positions in _blocks: the session and the overlays are both built from this list, so a
+    // result arriving for region 1 is for whatever block is second in it.
+    private List<RealtimeRegion> Regions() => _blocks
+        .Select((block, index) => new RealtimeRegion(index, block.Bounds, block.Mode, block.Orientation))
+        .ToList();
+
+    /// <summary>
+    /// Opens one overlay per region, over its block or — with 對照顯示 on, for a block whose copy the
+    /// user has not turned off — over the block's copy.
+    /// </summary>
+    /// <remarks>
+    /// The two 進階選項 looks are turned off for the copy, whatever the page says. Both exist to make
+    /// the translation sit in the picture where the source was — one erases the source and repairs
+    /// the background, the other reads the source's colour — and under 對照顯示 the source is meant
+    /// to stay visible and the translation is somewhere else. A patch repaired from the block and
+    /// pasted beside it would be a piece of the wrong place; the band is the honest look for a
+    /// translation drawn next to its source, and it costs no screen grabs. A block with its copy
+    /// turned off is drawn over itself, so it gets them back exactly as with the switch off.
+    /// </remarks>
+    private void ShowBlockWindows(RealtimeStartRequest request, IReadOnlyList<RealtimeRegion> regions)
+    {
+        var copies = _compareDisplay ? CompareLocations(request) : null;
+
+        // Resolved before the overlays are shown. They are click-through and belong to this process,
+        foreach (var region in regions)
+        {
+            var block = _blocks[region.Id];
+            bool compared = copies is not null && !block.CompareHidden;
+            var window = new RealtimeBlockWindow(
+                region.Id, region.Bounds, GrabUnderlying, request.SourceLanguage, request.TargetLanguage,
+                request.TextColor, request.ScrimColor, request.ScrimOpacity,
+                request.NaturalBackground && !compared,
+                request.SampleSourceTextColor && !compared,
+                region.Mode, request.Border, request.FixedBorderColor, region.Orientation,
+                compared ? copies![region.Id] : null, compared ? block.CompareScale : 1.0);
+            _blockWindows[region.Id] = window;
+            window.Show();
+        }
+    }
+
+    /// <summary>
+    /// Where each block's copy goes on screen, indexed like <see cref="_blocks"/> — which is what a
+    /// region's id is. The entry for a block whose copy is turned off means nothing.
+    /// </summary>
+    private System.Drawing.Point[] CompareLocations(RealtimeStartRequest request)
+    {
+        var offsets = RealtimeComparePlacement.Place(
+            [.. _blocks.Select(block =>
+                new RealtimeCompareSlot(
+                    block.Bounds, block.Orientation, block.CompareOffset, block.CompareScale, block.CompareHidden))],
+            request.ScreenBounds);
+
+        return [.. _blocks.Select((block, index) => new System.Drawing.Point(
+            block.Bounds.X + offsets[index].X, block.Bounds.Y + offsets[index].Y))];
+    }
+
+    /// <summary>
+    /// Switches 對照顯示, from the bar or the capsule, without ending anything.
+    /// </summary>
+    /// <remarks>
+    /// <para>Written to the settings file on the press, like the edit layer's own states: a session
+    /// over a full-screen game is as likely to end with the machine shutting down as with
+    /// 結束即時翻譯.</para>
+    ///
+    /// <para>While framing, the edit layer shows or hides the copies' outlines and that is all. While
+    /// translating, the overlays are built again in their new places rather than moved: a window
+    /// pinned beside its block also has to stop repairing the picture under itself (see
+    /// <see cref="ShowBlockWindows"/>), and those choices are made once, when a window is built. The
+    /// session is not touched — no pause, no new reading — and each window is handed back the words
+    /// it was showing, so the switch moves the translation rather than blanking it until the next
+    /// line arrives. A paused session has nothing to hand back, which is the right answer: it is
+    /// paused precisely so that nothing shows.</para>
+    ///
+    /// <para>The capture backend is told about the new handles straight away, because it keeps the
+    /// overlays out of its frames by handle — a window it has not heard of would be read back as
+    /// source text. It drops frames until its list matches, so for that moment nothing is read,
+    /// which is the safe side to be wrong on.</para>
+    /// </remarks>
+    private void ToggleCompareDisplay()
+    {
+        if (_request is not { } request || _control is not { } control) return;
+
+        // The bar is off the screen while a capture stands on the session, so this is unreachable
+        // then — and windows rebuilt now would appear over the capture that hid their predecessors.
+        if (_interlude.HideLayers) return;
+
+        _compareDisplay = !_compareDisplay;
+        control.SetCompareDisplay(_compareDisplay);
+
+        var settings = SettingsService.Instance;
+        if (settings.Current.Realtime.CompareDisplay != _compareDisplay)
+        {
+            settings.Current.Realtime.CompareDisplay = _compareDisplay;
+            settings.Save();
+        }
+
+        _edit?.SetCompareDisplay(_compareDisplay);
+
+        if (!IsTranslating || _blockWindows.Count == 0) return;
+
+        var shown = new Dictionary<int, IReadOnlyList<TranslatedBlock>>(_shownLines);
+
+        CloseBlockWindows();
+        ShowBlockWindows(request, Regions());
+        RefreshOverlayHandles();
+
+        foreach (var (id, lines) in shown)
+        {
+            if (!_blockWindows.TryGetValue(id, out var window)) continue;
+            window.SetLines(lines);
+            _shownLines[id] = lines;
+        }
+
+        // The new windows opened above the bar; it goes back on top of them.
+        control.BringToFront();
+
+        Log.Info("Realtime compare display switched {State} mid-session", _compareDisplay ? "on" : "off");
     }
 
     /// <summary>
@@ -846,7 +1023,10 @@ internal sealed class RealtimeSessionController
             // The user may have gone back to edit mode while this pass was in flight; its window is
             // gone and the result belongs to a layout that no longer exists.
             if (_blockWindows.TryGetValue(update.RegionId, out var window))
+            {
                 window.SetLines(update.Lines);
+                _shownLines[update.RegionId] = update.Lines;
+            }
         });
 
     private void OnSessionFailed(object? sender, string message) =>
@@ -881,6 +1061,7 @@ internal sealed class RealtimeSessionController
         foreach (var window in _blockWindows.Values)
             CloseWindow(window, nameof(RealtimeBlockWindow));
         _blockWindows.Clear();
+        _shownLines.Clear();
         RefreshOverlayHandles();
     }
 

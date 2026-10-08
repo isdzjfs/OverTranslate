@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>OverTranslate — Windows 用のリアルタイム画面翻訳ツール</title>
-<meta name="description" content="OverTranslate は Windows 向けの無料の画面翻訳ツールです。ウェブページ・漫画・動画・ゲームなど、さまざまな場面でキャプチャ翻訳やリアルタイム翻訳などの機能を利用できます。" />
+<meta name="description" content="OverTranslate は Windows 向けの無料のリアルタイム画面翻訳ツールです。内蔵の OCR でゲーム・漫画・動画・ウェブページの文字を読み取り、訳文を原文の上にオーバーレイ表示します。キャプチャ翻訳とリアルタイム翻訳に対応。" />
 <meta name="theme-color" content="#070C14" media="(prefers-color-scheme: dark)" />
 <meta name="theme-color" content="#F7F9FC" media="(prefers-color-scheme: light)" />
 <link rel="canonical" href="https://hon-lu.github.io/OverTranslate/ja/" />
@@ -23,10 +23,11 @@
 <meta property="og:image:width" content="2400" />
 <meta property="og:image:height" content="1260" />
 <meta name="twitter:card" content="summary_large_image" />
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "OverTranslate", "applicationCategory": "UtilitiesApplication", "operatingSystem": "Windows 10, Windows 11", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "downloadUrl": "https://github.com/Hon-Lu/OverTranslate/releases/latest", "url": "https://hon-lu.github.io/OverTranslate/ja/", "description": "OverTranslate は Windows 向けの無料のリアルタイム画面翻訳ツールです。内蔵の OCR でゲーム・漫画・動画・ウェブページの文字を読み取り、訳文を原文の上にオーバーレイ表示します。キャプチャ翻訳とリアルタイム翻訳に対応。", "inLanguage": "ja", "sameAs": ["https://github.com/Hon-Lu/OverTranslate"]}</script>
 <link rel="icon" type="image/svg+xml" href="../images/icon.svg" />
 <link rel="apple-touch-icon" sizes="180x180" href="../images/icon/apple-touch-icon.png" />
 <link rel="preconnect" href="https://img.shields.io" />
-<link rel="stylesheet" href="../site/styles.css?v=23e5c0037c" />
+<link rel="stylesheet" href="../site/styles.css?v=a651649ecc" />
 <script>
   (function () {
     var d = document.documentElement;
@@ -210,44 +211,50 @@
       <div class="split__text reveal">
         <p class="kicker" data-i18n="capture.kicker">キャプチャ翻訳</p>
         <h2 class="h2" data-i18n="capture.title">範囲を選ぶと、訳文が原文の上に重なります</h2>
-        <p data-i18n="capture.body1">ショートカットキーを押して翻訳したい範囲を選ぶだけで、画面の文字を読み取って翻訳します。Web ページ、PDF、画像、漫画、動画、ゲームに対応し、繁体字中国語・簡体字中国語・英語・日本語・韓国語を自動で判別します。</p>
+        <p data-i18n="capture.body1">ショートカットキーを押して翻訳したい範囲を選ぶだけで、画面の文字を OCR で読み取って翻訳します。Web ページ、PDF、画像、漫画、動画、ゲームに対応し、繁体字中国語・簡体字中国語・英語・日本語・韓国語を自動で判別します。</p>
         <aside class="aside">
           <p data-i18n="capture.tray">メインウィンドウは閉じてタスクトレイに常駐できるので、ふだんは開いたままにしておく必要はありません。</p>
         </aside>
       </div>
 
       <div class="split__media reveal">
-        <figure class="shot">
-          <div class="compare compare--comic" data-compare>
-            <img class="compare__img" src="../images/截圖翻譯1-後.png" width="1416" height="1224" alt="マンガを翻訳した画面" data-i18n-attr="alt|shot.comicpage.after" loading="lazy" decoding="async" />
-            <div class="compare__clip">
-              <img class="compare__img" src="../images/截圖翻譯1-前.png" width="1416" height="1225" alt="翻訳前の日本語のマンガ" data-i18n-attr="alt|shot.comicpage.before" loading="lazy" decoding="async" />
-            </div>
-            <span class="compare__tag compare__tag--before" data-i18n="compare.before">原文</span>
-            <span class="compare__tag compare__tag--after" data-i18n="compare.after">訳文</span>
-            <div class="compare__handle" data-compare-handle role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-label="ドラッグして原文と訳文を見比べる" data-i18n-attr="aria-label|a11y.compare">
-              <span class="compare__grip" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M10 8.5 6.5 12l3.5 3.5M14 8.5l3.5 3.5L14 15.5"/></svg></span>
-            </div>
-          </div>
-          <figcaption class="src" data-i18n-html="capture.cap.comic">マンガの出典：<a href="https://atmarkit.itmedia.co.jp/ait/articles/2604/02/news010.html" target="_blank" rel="noopener">こうしす！＠IT支線</a></figcaption>
+        <figure class="shot shot--plain">
+          <img src="../images/翻譯比對圖.png" width="1407" height="966" alt="英語の検索結果を翻訳する前と後の比較" data-i18n-attr="alt|shot.capture.overview" loading="lazy" decoding="async" data-zoom />
         </figure>
       </div>
     </div>
 
-    <figure class="shot subsection reveal">
-      <div class="compare compare--wide" data-compare>
-        <img class="compare__img" src="../images/截圖翻譯2-後.png" width="1722" height="886" alt="韓国語の Web ページを翻訳した画面" data-i18n-attr="alt|shot.capture.after" loading="lazy" decoding="async" />
-        <div class="compare__clip">
-          <img class="compare__img" src="../images/截圖翻譯2-前.png" width="1730" height="891" alt="翻訳前の韓国語の Web ページ" data-i18n-attr="alt|shot.capture.before" loading="lazy" decoding="async" />
-        </div>
+    <div class="grid2 capture__compares subsection reveal">
+      <figure class="shot">
+        <div class="compare compare--capture0" data-compare>
+          <img class="compare__img" src="../images/截圖翻譯0-後.png" width="751" height="1002" alt="英語のマンガを翻訳した画面" data-i18n-attr="alt|shot.capture0.after" loading="lazy" decoding="async" />
+          <div class="compare__clip">
+            <img class="compare__img" src="../images/截圖翻譯0-前.png" width="751" height="1002" alt="翻訳前の英語のマンガ" data-i18n-attr="alt|shot.capture0.before" loading="lazy" decoding="async" />
+          </div>
           <span class="compare__tag compare__tag--before" data-i18n="compare.before">原文</span>
           <span class="compare__tag compare__tag--after" data-i18n="compare.after">訳文</span>
           <div class="compare__handle" data-compare-handle role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-label="ドラッグして原文と訳文を見比べる" data-i18n-attr="aria-label|a11y.compare">
             <span class="compare__grip" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M10 8.5 6.5 12l3.5 3.5M14 8.5l3.5 3.5L14 15.5"/></svg></span>
           </div>
-      </div>
-      <figcaption class="src" data-i18n-html="capture.cap.web">画面の出典：<a href="https://www.naddic.co.kr/ko/cls/index" target="_blank" rel="noopener">Closers 公式サイト（NADDIC GAMES）</a></figcaption>
-    </figure>
+        </div>
+        <figcaption class="src" data-i18n-html="capture.cap.ai">マンガの原画：AI 生成</figcaption>
+      </figure>
+      <figure class="shot">
+        <div class="compare compare--comic" data-compare>
+          <img class="compare__img" src="../images/截圖翻譯1-後.png" width="842" height="1305" alt="マンガを翻訳した画面" data-i18n-attr="alt|shot.comicpage.after" loading="lazy" decoding="async" />
+          <div class="compare__clip">
+            <img class="compare__img" src="../images/截圖翻譯1-前.png" width="842" height="1305" alt="翻訳前の日本語のマンガ" data-i18n-attr="alt|shot.comicpage.before" loading="lazy" decoding="async" />
+          </div>
+          <span class="compare__tag compare__tag--before" data-i18n="compare.before">原文</span>
+          <span class="compare__tag compare__tag--after" data-i18n="compare.after">訳文</span>
+          <div class="compare__handle" data-compare-handle role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-label="ドラッグして原文と訳文を見比べる" data-i18n-attr="aria-label|a11y.compare">
+            <span class="compare__grip" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M10 8.5 6.5 12l3.5 3.5M14 8.5l3.5 3.5L14 15.5"/></svg></span>
+          </div>
+        </div>
+        <figcaption class="src" data-i18n-html="capture.cap.comic">マンガの出典：<a href="https://atmarkit.itmedia.co.jp/ait/articles/2604/02/news010.html" target="_blank" rel="noopener">こうしす！＠IT支線</a></figcaption>
+      </figure>
+    </div>
+    <p class="shots__note reveal" data-i18n="compare.note">上記の翻訳比較はすべて、OverTranslate を実際に動かした結果です。</p>
 
     <div class="split subsection reveal">
       <div class="split__text">
@@ -272,7 +279,7 @@
     <header class="sectionhead reveal">
       <p class="kicker" data-i18n="realtime.kicker">リアルタイム翻訳</p>
       <h2 class="h2" data-i18n="realtime.title">画面の文字が変われば、訳文もすぐ更新</h2>
-      <p class="sectionlede" data-i18n="realtime.lede">翻訳したい範囲を選ぶと、画面の文字を読み取り続けて訳文を自動で更新します。動画の字幕、ゲーム画面、マンガに向いており、訳文は元の位置にそのまま表示されます。</p>
+      <p class="sectionlede" data-i18n="realtime.lede">翻訳したい範囲を選ぶと、画面の文字を読み取り続けて訳文を自動で更新します。動画の字幕、ゲーム画面、マンガに向いており、訳文は元の位置にオーバーレイ表示されます。</p>
     </header>
 
     <div class="facts reveal">
@@ -301,26 +308,42 @@
       </div>
 
       <div class="tabs__panel" id="panel-prose" role="tabpanel" aria-labelledby="tab-prose" data-tabpanel>
-        <div class="grid2">
+        <div class="grid2 prose__comics">
           <figure class="shot">
-            <div class="compare compare--tall" data-compare>
-              <img class="compare__img" src="../images/即時翻譯-漫畫翻譯後.png" width="913" height="1381" alt="マンガをリアルタイム翻訳した画面" data-i18n-attr="alt|shot.comic.after" loading="lazy" decoding="async" />
+            <div class="compare compare--comicai" data-compare>
+              <img class="compare__img" src="../images/即時翻譯-漫畫翻譯.png" width="786" height="1291" alt="AI 生成マンガをリアルタイム翻訳した画面" data-i18n-attr="alt|shot.comicai.after" loading="lazy" decoding="async" />
               <div class="compare__clip">
-                <img class="compare__img" src="../images/即時翻譯-漫畫翻譯前.png" width="913" height="1380" alt="翻訳前の日本語のマンガ" data-i18n-attr="alt|shot.comic.before" loading="lazy" decoding="async" />
+                <img class="compare__img" src="../images/即時翻譯-漫畫框.png" width="786" height="1291" alt="AI 生成マンガの範囲を選んだ画面" data-i18n-attr="alt|shot.comicai.before" loading="lazy" decoding="async" />
               </div>
-              <span class="compare__tag compare__tag--before" data-i18n="compare.before">原文</span>
+              <span class="compare__tag compare__tag--before" data-i18n="compare.select">範囲選択</span>
               <span class="compare__tag compare__tag--after" data-i18n="compare.after">訳文</span>
               <div class="compare__handle" data-compare-handle role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-label="ドラッグして原文と訳文を見比べる" data-i18n-attr="aria-label|a11y.compare">
                 <span class="compare__grip" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M10 8.5 6.5 12l3.5 3.5M14 8.5l3.5 3.5L14 15.5"/></svg></span>
               </div>
             </div>
-            <figcaption class="src" data-i18n-html="realtime.cap.comic">マンガの出典：<a href="https://x.com/kiyo_mariari/status/1980247239948988588/photo/1" target="_blank" rel="noopener">@kiyo_mariari</a></figcaption>
+            <figcaption class="src" data-i18n-html="realtime.cap.comicai">マンガの原画：AI 生成</figcaption>
           </figure>
           <figure class="shot">
-            <div class="compare" data-compare>
+            <div class="compare compare--tall" data-compare>
+              <img class="compare__img" src="../images/即時翻譯1-漫畫翻譯.png" width="1048" height="1343" alt="マンガをリアルタイム翻訳した画面" data-i18n-attr="alt|shot.comic.after" loading="lazy" decoding="async" />
+              <div class="compare__clip">
+                <img class="compare__img" src="../images/即時翻譯1-漫畫框.png" width="1048" height="1343" alt="翻訳前の日本語のマンガ" data-i18n-attr="alt|shot.comic.before" loading="lazy" decoding="async" />
+              </div>
+              <span class="compare__tag compare__tag--before" data-i18n="compare.select">範囲選択</span>
+              <span class="compare__tag compare__tag--after" data-i18n="compare.after">訳文</span>
+              <div class="compare__handle" data-compare-handle role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-label="ドラッグして原文と訳文を見比べる" data-i18n-attr="aria-label|a11y.compare">
+                <span class="compare__grip" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M10 8.5 6.5 12l3.5 3.5M14 8.5l3.5 3.5L14 15.5"/></svg></span>
+              </div>
+            </div>
+            <figcaption class="src" data-i18n-html="realtime.cap.comic">マンガの出典：<a href="https://x.com/kiyo_mariari/status/2101991547877429535?s=20" target="_blank" rel="noopener">@kiyo_mariari</a></figcaption>
+          </figure>
+        </div>
+        <div class="grid2 prose__screens">
+          <figure class="shot">
+            <div class="compare compare--video" data-compare>
               <img class="compare__img" src="../images/即時翻譯-影片翻譯.png" width="1920" height="1080" alt="動画の字幕をリアルタイム翻訳した画面" data-i18n-attr="alt|shot.video.after" loading="lazy" decoding="async" />
               <div class="compare__clip">
-                <img class="compare__img" src="../images/即時翻譯-影片框.png" width="1921" height="1080" alt="動画の字幕の範囲を選んだ画面" data-i18n-attr="alt|shot.video.before" loading="lazy" decoding="async" />
+                <img class="compare__img" src="../images/即時翻譯-影片框.png" width="1920" height="1080" alt="動画の字幕の範囲を選んだ画面" data-i18n-attr="alt|shot.video.before" loading="lazy" decoding="async" />
               </div>
               <span class="compare__tag compare__tag--before" data-i18n="compare.select">範囲選択</span>
               <span class="compare__tag compare__tag--after" data-i18n="compare.after">訳文</span>
@@ -331,21 +354,7 @@
             <figcaption class="src" data-i18n-html="realtime.cap.video">動画の出典：<a href="https://www.youtube.com/watch?v=Tsmf4dkigbw" target="_blank" rel="noopener">BanG Dream! Girls Band Party!☆PICO～OHMORI～</a></figcaption>
           </figure>
           <figure class="shot">
-            <div class="compare" data-compare>
-              <img class="compare__img" src="../images/即時翻譯1-對話遊戲翻譯.png" width="2557" height="1437" alt="ゲームのストーリー会話をリアルタイム翻訳した画面" data-i18n-attr="alt|shot.story.after" loading="lazy" decoding="async" />
-              <div class="compare__clip">
-                <img class="compare__img" src="../images/即時翻譯1-對話遊戲框.png" width="2557" height="1437" alt="ゲームのストーリー会話の範囲を選んだ画面" data-i18n-attr="alt|shot.story.before" loading="lazy" decoding="async" />
-              </div>
-              <span class="compare__tag compare__tag--before" data-i18n="compare.select">範囲選択</span>
-              <span class="compare__tag compare__tag--after" data-i18n="compare.after">訳文</span>
-              <div class="compare__handle" data-compare-handle role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-label="ドラッグして原文と訳文を見比べる" data-i18n-attr="aria-label|a11y.compare">
-                <span class="compare__grip" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M10 8.5 6.5 12l3.5 3.5M14 8.5l3.5 3.5L14 15.5"/></svg></span>
-              </div>
-            </div>
-            <figcaption class="src" data-i18n-html="realtime.cap.story">ゲーム画面の出典：<a href="https://store.steampowered.com/app/3101040" target="_blank" rel="noopener">『魔法少女ノ魔女裁判』</a></figcaption>
-          </figure>
-          <figure class="shot">
-            <div class="compare" data-compare>
+            <div class="compare compare--video" data-compare>
               <img class="compare__img" src="../images/即時翻譯2-對話遊戲翻譯.png" width="2557" height="1437" alt="ゲームのストーリー会話をリアルタイム翻訳した画面" data-i18n-attr="alt|shot.story2.after" loading="lazy" decoding="async" />
               <div class="compare__clip">
                 <img class="compare__img" src="../images/即時翻譯2-對話遊戲框.png" width="2557" height="1437" alt="ゲームのストーリー会話の範囲を選んだ画面" data-i18n-attr="alt|shot.story2.before" loading="lazy" decoding="async" />
@@ -398,6 +407,7 @@
         </div>
       </div>
     </div>
+    <p class="shots__note reveal" data-i18n="compare.note">上記の翻訳比較はすべて、OverTranslate を実際に動かした結果です。</p>
 
     <div class="split subsection reveal">
       <div class="split__text">
@@ -487,8 +497,8 @@
 
     <div class="split split--tight">
       <div class="split__text reveal">
-        <h3 class="h3" data-i18n="engines.selection.title">翻訳エンジンの選択</h3>
-        <p data-i18n="engines.selection.body">すべての翻訳機能は選択したエンジンのみを使用し、失敗しても別のサービスへ自動で切り替えません。辞書結果も選択したサービスからのみ取得します。</p>
+        <h3 class="h3" data-i18n="engines.fallback.title">翻訳エラー</h3>
+        <p data-i18n="engines.fallback.body">選択したエンジンだけを使用します。リクエストが失敗した場合は、自動再試行や他のサービスへの切り替えをせず、エラーを表示します。正常応答に混在言語の未翻訳部分がある場合は補正します。</p>
       </div>
       <div class="split__text reveal">
         <h3 class="h3" data-i18n="engines.advanced.title">外部の翻訳サービスと AI モデル</h3>
@@ -547,7 +557,7 @@
           <li><strong data-i18n="settings.5.title">スタートアップとキャプチャの保存</strong><span data-i18n="settings.5.body">Windows の起動時に自動で立ち上げ、キャプチャを指定した場所へ自動保存できます。</span></li>
         </ul>
         <p>
-          <a class="textlink" href="https://github.com/Hon-Lu/OverTranslate/blob/main/docs/README.ja.md" data-loc-href="readme" target="_blank" rel="noopener">
+          <a class="textlink" href="https://github.com/Hon-Lu/OverTranslate/blob/main/README.ja.md" data-loc-href="readme" target="_blank" rel="noopener">
             <span data-i18n="settings.link">設定の詳しい説明</span>
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 18 18 6M9 6h9v9"/></svg>
           </a>
@@ -662,6 +672,18 @@
   <img class="zoom__img" data-zoom-img src="" alt="" />
 </div>
 
-<script src="../site/app.js?v=23ea7c9d92" defer></script>
+<template data-compare-zoom-tpl>
+  <button class="compare__zoom" type="button" data-compare-zoom aria-label="拡大して比べる" data-i18n-attr="aria-label|a11y.zoomcompare">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5M10.5 8v5M8 10.5h5"/></svg>
+  </button>
+</template>
+
+<div class="zoom zoom--compare" data-cmpzoom-layer hidden>
+  <button class="zoom__close" type="button" data-cmpzoom-close aria-label="閉じる" data-i18n-attr="aria-label|a11y.close">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+  </button>
+</div>
+
+<script src="../site/app.js?v=03618d89f2" defer></script>
 </body>
 </html>
