@@ -71,11 +71,13 @@ public class TranslationService
     private readonly DictionaryLookupProvider _googleDictionary;
     private readonly DictionaryLookupProvider _bingDictionary;
     private readonly DictionaryLookupProvider _microsoftDictionary;
+    private readonly GoogleConnectionKeepAlive _googleConnectionKeepAlive;
 
     public TranslationService(HttpClient? http = null, Func<string>? loadGoogleKey = null,
         Action<string>? saveGoogleKey = null)
     {
         var client = http ?? Http;
+        _googleConnectionKeepAlive = new(client, () => Saved);
         _youdao = new(http ?? YoudaoHttp);
         _google = new(new GoogleChromeTranslator(client,
             loadGoogleKey ?? (() => SettingsService.Instance.Current.GoogleChromeApiKey),
@@ -94,6 +96,9 @@ public class TranslationService
     }
 
     private static TranslationProvider Saved => SettingsService.Instance.Current.Provider;
+
+    internal Task KeepGoogleConnectionWarmAsync(CancellationToken cancellationToken) =>
+        _googleConnectionKeepAlive.RunAsync(cancellationToken);
 
     // Keep the concrete endpoint the user selected. Failures never start another engine.
     private ITranslationProvider Selected(TranslationProvider provider) => provider switch

@@ -18,6 +18,7 @@ public partial class App
     private const string ActivateEventName = "OverTranslate_Activate_9F3C7B2E";
 
     private EventWaitHandle? _activateEvent;
+    private CancellationTokenSource? _googleConnectionKeepAlive;
 
     [STAThread]
     private static void Main(string[] args)
@@ -104,6 +105,10 @@ public partial class App
         MainWindow = mainWindow;
         mainWindow.InitializeApp();
 
+        _googleConnectionKeepAlive = new CancellationTokenSource();
+        var keepAliveToken = _googleConnectionKeepAlive.Token;
+        _ = Task.Run(() => AppServices.Translation.KeepGoogleConnectionWarmAsync(keepAliveToken));
+
         UpdateNotifier.StartPolling();
         _ = PromptForUpdateAsync();
 
@@ -147,6 +152,8 @@ public partial class App
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _googleConnectionKeepAlive?.Cancel();
+        _googleConnectionKeepAlive?.Dispose();
         _activateEvent?.Dispose();
         base.OnExit(e);
     }

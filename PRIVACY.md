@@ -2,7 +2,7 @@
 
 
 
-_Last updated: 2026-08-21_
+_Last updated: 2026-10-16_
 
 
 
@@ -47,6 +47,8 @@ Depending on the translation provider configured by the user, recognized text ma
 
 
 These services may include providers such as Microsoft Translator, Google Translate, OpenAI, or other translation APIs configured by the user.
+
+While Google Translate (Google2) is selected, OverTranslate sends a lightweight connection warmup request to its translation host at startup and approximately every 45 seconds. These requests contain no screenshot, recognized text, or API key. They stop when a different provider is selected or the application exits.
 
 
 
