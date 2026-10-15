@@ -88,7 +88,7 @@
     <sys:String x:Key="S.Error.OpenAiNoModel">No model name is set. Enter the model to use in the translation service settings.</sys:String>
     <sys:String x:Key="S.Error.UnknownError">Unknown error</sys:String>
     <sys:String x:Key="S.Error.NoErrorContent">No error details provided</sys:String>
-    <sys:String x:Key="S.Error.OcrUnsupportedLanguage">OCR currently supports AUTO, EN, ZH, ZH-HANT, JA and KO only; "{0}" is not supported yet.</sys:String>
+    <sys:String x:Key="S.Error.OcrUnsupportedLanguage">OCR currently supports AUTO, EN, ZH, ZH-HANT, JA, KO and RU only; "{0}" is not supported yet.</sys:String>
     <sys:String x:Key="S.Error.OcrSwapTimeout">Timed out waiting for other recognition to finish before switching OCR models.</sys:String>
     <sys:String x:Key="S.Error.OcrImageConvert">Could not convert the image into a format the ONNX OCR can read.</sys:String>
     <sys:String x:Key="S.Error.OcrModelMissing">OCR model file not found: {0}</sys:String>
@@ -403,6 +403,7 @@ Details: {0}</sys:String>
     <sys:String x:Key="S.Provider.Microsoft">Microsoft Translator</sys:String>
     <sys:String x:Key="S.Provider.DeepL">DeepL</sys:String>
     <sys:String x:Key="S.Provider.DeepLHint">Requires an API key from DeepL</sys:String>
+    <sys:String x:Key="S.Provider.Youdao">Youdao Translate</sys:String>
     <sys:String x:Key="S.Provider.OpenAI">OpenAI</sys:String>
     <sys:String x:Key="S.Provider.OpenAIHint">Any OpenAI-compatible API. A local LLM is recommended — Ollama is the quickest way to set one up.</sys:String>
 
@@ -622,7 +623,7 @@ same settings, the same seed usually gives the same output.</sys:String>
          instead of these, so they exist here for parity and for anything that asks for a
          name by key. -->
     <sys:String x:Key="S.Lang.Automatic">Automatic</sys:String>
-    <sys:String x:Key="S.Lang.AutomaticOcr">Automatic (ZH/EN/JA)</sys:String>
+    <sys:String x:Key="S.Lang.AutomaticOcr">Automatic (ZH/EN/JA/RU)</sys:String>
     <sys:String x:Key="S.Lang.English">English</sys:String>
     <sys:String x:Key="S.Lang.Japanese">Japanese</sys:String>
     <sys:String x:Key="S.Lang.Korean">Korean</sys:String>

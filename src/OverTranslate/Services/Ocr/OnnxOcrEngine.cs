@@ -308,6 +308,7 @@ internal sealed class OnnxOcrEngine : IOcrEngine
         OcrLanguageRouter.Normalize(language) switch
         {
             "KO" => "korean",
+            "RU" => "cyrillic",
             // Everything else uses the general ("cjk") model — PP-OCRv6_small_rec, one model
             // covering 50 languages: Simplified and Traditional Chinese, English, Japanese, and 46
             // Latin-script ones. English UI captures very often contain embedded Chinese (chrome,
@@ -470,6 +471,7 @@ internal sealed class OnnxOcrEngine : IOcrEngine
     {
         private readonly OnnxOcrEngine _owner;
         private readonly RapidOcr _engine;
+        private readonly RapidOcrRuntime _runtime;
         private readonly string _language;
         private readonly SKBitmap _skBitmap;
         private readonly DetectorFrame _frame;
@@ -497,6 +499,7 @@ internal sealed class OnnxOcrEngine : IOcrEngine
             _verticalText = verticalText;
             _releasesRuntime = releasesRuntime;
             _engine = runtime.Engine;
+            _runtime = runtime;
             _language = normalizedLanguage;
             _skBitmap = ConvertToSkBitmap(bitmap);
             _frame = CreateDetectorFrame(_skBitmap, maxDetectSize);
@@ -617,6 +620,22 @@ internal sealed class OnnxOcrEngine : IOcrEngine
                 // library's own 180° rotation is gated on it.
                 var recognizer = (TextRecognizer)TextRecognizerField.GetValue(_engine)!;
                 var lines = recognizer.GetTextLines(partImages);
+                if (OcrLanguageRouter.UsesAutomaticLayout(_language))
+                {
+                    // Reuse the detector's crops. Only recognition is repeated, and confident CJK
+                    // lines keep their original reading without loading or invoking another model.
+                    var candidates = Enumerable.Range(0, lines.Length)
+                        .Where(index => AutomaticOcrRecognition.NeedsCyrillicReading(lines[index])).ToArray();
+                    if (candidates.Length > 0)
+                    {
+                        var cyrillic = _runtime.RecognizeCyrillic(candidates.Select(index => partImages[index]).ToArray());
+                        for (var i = 0; i < candidates.Length; i++)
+                        {
+                            var index = candidates[i];
+                            lines[index] = AutomaticOcrRecognition.Choose(lines[index], cyrillic[i]);
+                        }
+                    }
+                }
 
                 var textBlocks = new List<TextBlock>(chosen.Count);
                 for (var i = 0; i < chosen.Count; i++)
@@ -2112,6 +2131,38 @@ internal sealed class OnnxOcrEngine : IOcrEngine
 
     internal sealed record RapidOcrRuntime(string ModelName, RapidOcr Engine) : IDisposable
     {
-        public void Dispose() => Engine.Dispose();
+        private readonly object _cyrillicSync = new();
+        private TextRecognizer? _cyrillic;
+
+        internal TextLine[] RecognizeCyrillic(SKBitmap[] crops)
+        {
+            // The same lifetime as the primary runtime, including its idle release and in-use
+            // protection. Serialise the secondary recognizer across concurrent capture sessions.
+            lock (_cyrillicSync)
+            {
+                if (_cyrillic is null)
+                {
+                    var path = Path.Combine(ModelRoot, "cyrillic");
+                    var model = Path.Combine(path, "rec.onnx");
+                    var dictionary = Path.Combine(path, "dict.txt");
+                    EnsureModelFile(model);
+                    EnsureModelFile(dictionary);
+                    var recognizer = new TextRecognizer();
+                    recognizer.InitModel(model, dictionary, ThreadCount);
+                    _cyrillic = recognizer;
+                }
+                return _cyrillic.GetTextLines(crops);
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (_cyrillicSync)
+            {
+                _cyrillic?.Dispose();
+                _cyrillic = null;
+                Engine.Dispose();
+            }
+        }
     }
 }

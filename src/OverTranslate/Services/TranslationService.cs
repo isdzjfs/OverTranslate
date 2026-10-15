@@ -58,12 +58,14 @@ public class TranslationService
 {
     private static readonly HttpClient Http = EngineHttp.CreateClient(TranslationTiming.Request);
     private static readonly HttpClient DeepLHttp = new() { Timeout = TranslationTiming.Request };
+    private static readonly HttpClient YoudaoHttp = new() { Timeout = TimeSpan.FromSeconds(40) };
 
     private readonly EngineProvider _google;
     private readonly EngineProvider _googleWeb;
     private readonly EngineProvider _googleRpc;
     private readonly EngineProvider _bing;
     private readonly EngineProvider _microsoft;
+    private readonly YoudaoScreenshotProvider _youdao;
     private readonly DeepLProvider _deepL = new(DeepLHttp);
     private readonly OpenAiCompatibleProvider _openAi = new();
     private readonly DictionaryLookupProvider _googleDictionary;
@@ -74,6 +76,7 @@ public class TranslationService
         Action<string>? saveGoogleKey = null)
     {
         var client = http ?? Http;
+        _youdao = new(http ?? YoudaoHttp);
         _google = new(new GoogleChromeTranslator(client,
             loadGoogleKey ?? (() => SettingsService.Instance.Current.GoogleChromeApiKey),
             saveGoogleKey ?? (key =>
@@ -102,6 +105,7 @@ public class TranslationService
         TranslationProvider.Microsoft => _microsoft,
         TranslationProvider.DeepL => _deepL,
         TranslationProvider.OpenAI => _openAi,
+        TranslationProvider.Youdao => throw new NotSupportedException("Youdao supports screenshot translation only."),
         _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, null),
     };
 
@@ -114,7 +118,13 @@ public class TranslationService
     };
 
     public bool RequiresApiKey => Selected(Saved).RequiresApiKey;
-    public bool ProviderRequiresApiKey(TranslationProvider provider) => Selected(provider).RequiresApiKey;
+    public bool ProviderRequiresApiKey(TranslationProvider provider) =>
+        provider != TranslationProvider.Youdao && Selected(provider).RequiresApiKey;
+
+    public Task<ScreenshotTranslationResult> TranslateYoudaoScreenshotAsync(
+        System.Drawing.Bitmap bitmap, string sourceLang, string targetLang, string deviceId,
+        CancellationToken cancellationToken = default, bool verticalText = false) =>
+        _youdao.TranslateAsync(bitmap, sourceLang, targetLang, deviceId, cancellationToken, verticalText);
 
     public Task<(List<TranslatedBlock> Blocks, string DetectedLang)> TranslateAsync(
         List<OcrTextBlock> blocks, string sourceLang, string targetLang, string apiKey,

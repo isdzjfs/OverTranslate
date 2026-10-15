@@ -144,12 +144,13 @@ public static class LanguageData
 
     public static readonly List<LangItem> OcrSourceLanguages =
     [
-        new(AutomaticSourceLanguage, "S.Lang.AutomaticOcr",       "Automatic (ZH/EN/JA)", StandsAlone: true),
+        new(AutomaticSourceLanguage, "S.Lang.AutomaticOcr",       "Automatic (ZH/EN/JA/RU)", StandsAlone: true),
         new("EN",      "S.Lang.English",            "English"),
         new("JA",      "S.Lang.Japanese",           "Japanese"),
         new("KO",      "S.Lang.Korean",             "Korean"),
         new("ZH-HANT", "S.Lang.TraditionalChinese", "Traditional Chinese"),
         new("ZH",      "S.Lang.SimplifiedChinese",  "Simplified Chinese"),
+        new("RU",      "S.Lang.Russian",            "Russian"),
     ];
 
     public static readonly List<ProviderItem> Providers =
@@ -163,6 +164,13 @@ public static class LanguageData
         new(TranslationProvider.OpenAI,    "S.Provider.OpenAI",    false, "S.Provider.OpenAIHint"),
     ];
 
+    // Youdao accepts images, so text-only and realtime pickers keep using Providers.
+    public static readonly List<ProviderItem> CaptureProviders =
+    [
+        .. Providers,
+        new(TranslationProvider.Youdao, "S.Provider.Youdao", false),
+    ];
+
     /// <summary>Accept upstream's Beta name without changing this fork's saved endpoints.</summary>
     public static TranslationProvider CurrentProvider(TranslationProvider provider) =>
         provider == TranslationProvider.GoogleChrome ? TranslationProvider.Google : provider;
@@ -172,7 +180,7 @@ public static class LanguageData
     /// Falls back to the enum name so a newly added provider never shows an empty label.
     /// </summary>
     public static string GetProviderDisplay(TranslationProvider provider) =>
-        Providers.FirstOrDefault(p => p.Provider == provider)?.Display ?? provider.ToString();
+        CaptureProviders.FirstOrDefault(p => p.Provider == provider)?.Display ?? provider.ToString();
 
     public static readonly List<LangItem> TargetLanguages =
     [

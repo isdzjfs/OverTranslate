@@ -68,6 +68,8 @@ OverTranslate currently offers five translation features, so you can pick the on
 When you need a translation, press the hotkey (default Ctrl + Alt + A) and select the area you want to translate.
 > Works on web pages, PDFs, images, comics, videos, game interfaces, and any other screen where text can't be selected directly.
 
+Choose **Youdao Translate** in the screenshot toolbar to upload the selected image to Youdao for recognition and translation, without an API key. This screenshot-only choice leaves the translation service used by the other features unchanged.
+
 ![Translation comparison](docs/images/翻譯比對圖.png)
 
 | Source text | Translation |
@@ -241,9 +243,11 @@ OCR is handled by RapidOcrNet with ONNX models. The matching model is selected a
 |----------|-------------------------|
 | **English / Chinese (Simplified & Traditional) / Japanese** | PP-OCRv6 general recognition model (`PP-OCRv6_small_rec`), a single model covering Chinese, English, Japanese and many Latin-script languages, including common mixed Chinese-English layouts |
 | **Korean** | PP-OCRv5 Korean recognition model (`korean_PP-OCRv5_rec`), covering the Korean characters the general PP-OCRv6 model doesn't include |
+| **Russian** | PP-OCRv5 Cyrillic recognition model (`cyrillic_PP-OCRv5_rec_mobile`), available as a source language and included in **Automatic (ZH/EN/JA/RU)** |
+| **Automatic (ZH/EN/JA/RU)** | Shares one detection pass and chooses between the general and Cyrillic recognition results for each text line |
 
 All languages share the same **text detection model** (`PP-OCRv6_det_tiny`) and **orientation classification model** (`cls`); only the recognition model is switched per language.
-OCR runs entirely on your own PC, and images are never uploaded to any external service; the default models run on the CPU, while the manga vertical-text models run on the graphics card.
+The default OCR runs entirely on your own PC; the default models run on the CPU, while the manga vertical-text models run on the graphics card. Choosing Youdao Translate for screenshots uploads the selected image to Youdao instead.
 
 ---
 

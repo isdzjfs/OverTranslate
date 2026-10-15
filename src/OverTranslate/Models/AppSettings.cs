@@ -5,7 +5,7 @@ namespace OverTranslate.Models;
 [JsonConverter(typeof(JsonStringEnumConverter))]
 // Stored by name. Google remains this fork's translateHtml/Google2 choice, and
 // Google2 remains RPC. GoogleChrome accepts settings written by upstream's Beta option.
-public enum TranslationProvider { Google, Google2, GoogleChrome, GoogleWeb, Bing, Microsoft, DeepL, OpenAI }
+public enum TranslationProvider { Google, Google2, GoogleChrome, GoogleWeb, Bing, Microsoft, DeepL, OpenAI, Youdao }
 
 public class AppSettings
 {

@@ -57,8 +57,16 @@ tools/LayoutProbe/bin/Debug/net8.0-windows10.0.26100.0/win-x64/LayoutProbe.exe t
 
 > **它會按按鈕，但會把設定放回去。** 工具列是在「被按下」時把選擇寫進設定檔的，所以這支 probe 一開始會記下 `Capture.LayoutMode` 與 `Capture.VerticalText`，結束時寫回原值並在最後一行印出來。**量尺不該移動它量的東西。**
 
+## 有道截圖翻譯字號重放
+
+```powershell
+dotnet run --project tools/LayoutProbe -c Release -- youdao-fonts response.json source.png .test-artifacts/youdao-fonts
+```
+
+使用已保存的接口響應及其原始截圖，在隱藏的 WPF 浮層重放，輸出 `layout.json` 和 `overlay.png`，記錄每段原文行數、字形高度和實際渲染字號。不會顯示視窗或修改使用者設定。輸入截圖和響應僅留在本機，不加入版控。
+
 ## 已知限制
 
-- **視窗會真的被開出來。** 工具列開在 `(-4000, -4000)`；疊圖橫跨整個虛擬桌面，會在畫面上閃一下。
+- **`overlay`、`toolbar` 會真的開啟視窗。** 工具列開在 `(-4000, -4000)`；疊圖橫跨整個虛擬桌面，會在畫面上閃一下。`youdao-fonts` 只離線繪製，不顯示視窗。
 - **數字與 DPI 有關。** 這支工具用了與應用程式相同的 `app.manifest`（PerMonitorV2），所以它量到的座標系與應用程式一致；但不同縮放比例的機器上絕對值本來就不同，**跨機器比對絕對值是沒有意義的**，要比就在同一台機器上比 before/after。
 - **`overlay` 的 fixture 是手寫的，不是真的 OCR 結果。** 它要回答的是排版政策，不是辨識品質。

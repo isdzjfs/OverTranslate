@@ -89,7 +89,7 @@
     <sys:String x:Key="S.Error.OpenAiNoModel">モデル名が設定されていません。翻訳サービス設定で使用するモデルを入力してください。</sys:String>
     <sys:String x:Key="S.Error.UnknownError">不明なエラー</sys:String>
     <sys:String x:Key="S.Error.NoErrorContent">エラーの詳細はありません</sys:String>
-    <sys:String x:Key="S.Error.OcrUnsupportedLanguage">OCR が対応しているのは AUTO、EN、ZH、ZH-HANT、JA、KO のみです。「{0}」はまだ対応していません。</sys:String>
+    <sys:String x:Key="S.Error.OcrUnsupportedLanguage">OCR が対応しているのは AUTO、EN、ZH、ZH-HANT、JA、KO、RU のみです。「{0}」はまだ対応していません。</sys:String>
     <sys:String x:Key="S.Error.OcrSwapTimeout">OCR モデルの切り替えのため他の認識の完了を待ちましたが、タイムアウトしました。</sys:String>
     <sys:String x:Key="S.Error.OcrImageConvert">画像を ONNX OCR が読める形式に変換できませんでした。</sys:String>
     <sys:String x:Key="S.Error.OcrModelMissing">OCR モデルファイルが見つかりません：{0}</sys:String>
@@ -407,6 +407,7 @@
     <sys:String x:Key="S.Provider.Microsoft">Microsoft 翻訳</sys:String>
     <sys:String x:Key="S.Provider.DeepL">DeepL 翻訳</sys:String>
     <sys:String x:Key="S.Provider.DeepLHint">DeepL の公式サイトで登録して API キーを取得する必要があります</sys:String>
+    <sys:String x:Key="S.Provider.Youdao">有道翻訳</sys:String>
     <sys:String x:Key="S.Provider.OpenAI">OpenAI</sys:String>
     <sys:String x:Key="S.Provider.OpenAIHint">OpenAI 互換 API に対応。ローカル LLM の利用がおすすめで、Ollama を使うと手軽に導入できます。</sys:String>
 
@@ -624,7 +625,7 @@
          separately and the pickers show it alongside these, so only this interface's own word
          for each language belongs here. -->
     <sys:String x:Key="S.Lang.Automatic">自動</sys:String>
-    <sys:String x:Key="S.Lang.AutomaticOcr">自動（中・英・日）</sys:String>
+    <sys:String x:Key="S.Lang.AutomaticOcr">自動（中・英・日・露）</sys:String>
     <sys:String x:Key="S.Lang.English">英語</sys:String>
     <sys:String x:Key="S.Lang.Japanese">日本語</sys:String>
     <sys:String x:Key="S.Lang.Korean">韓国語</sys:String>

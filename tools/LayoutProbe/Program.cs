@@ -50,6 +50,9 @@ internal static class Program
                   LayoutProbe debug-panel [output-directory]
                       Renders the debug panel and toolbar offscreen in both themes without changing settings.
 
+                  LayoutProbe youdao-fonts response.json source.png [output-directory]
+                      Replays a Youdao response through an offscreen overlay and reports font sizes.
+
                 Both read the application's own settings file, so the toolbar opens on whatever mode
                 is stored on this machine.
                 """);
@@ -90,6 +93,9 @@ internal static class Program
                 case "glyphs":
                     System.IO.Directory.CreateDirectory(".test-artifacts/glyphs");
                     GlyphSheet.Save(".test-artifacts/glyphs");
+                    break;
+                case "youdao-fonts":
+                    YoudaoFontLayout.Report(args[1], args[2], args.Length > 3 ? args[3] : ".test-artifacts/youdao-fonts");
                     break;
                 default:
                     Console.Error.WriteLine($"unknown command '{args[0]}'");

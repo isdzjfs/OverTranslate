@@ -8,6 +8,17 @@ namespace OverTranslate.Models;
 public class CaptureSettings
 {
     /// <summary>
+    /// An image-only engine selected for screenshots. Null follows the shared text provider.
+    /// </summary>
+    public TranslationProvider? ImageProvider { get; set; }
+
+    /// <summary>A stable, installation-local identity for Youdao's screenshot endpoint.</summary>
+    public string YoudaoDeviceId { get; set; } = Guid.NewGuid().ToString("N")[..17];
+
+    public TranslationProvider GetProvider(TranslationProvider sharedProvider) =>
+        ImageProvider == TranslationProvider.Youdao ? TranslationProvider.Youdao : sharedProvider;
+
+    /// <summary>
     /// System font family used for translated text drawn over a screenshot. Empty keeps the
     /// application's default font stack for the target language.
     /// </summary>

@@ -94,7 +94,7 @@
     <sys:String x:Key="S.Error.OpenAiNoModel">尚未指定模型名稱。請在「翻譯服務設定」中填入要使用的模型。</sys:String>
     <sys:String x:Key="S.Error.UnknownError">未知錯誤</sys:String>
     <sys:String x:Key="S.Error.NoErrorContent">未提供錯誤內容</sys:String>
-    <sys:String x:Key="S.Error.OcrUnsupportedLanguage">目前 OCR 僅支援 AUTO、EN、ZH、ZH-HANT、JA、KO；「{0}」尚未支援。</sys:String>
+    <sys:String x:Key="S.Error.OcrUnsupportedLanguage">目前 OCR 僅支援 AUTO、EN、ZH、ZH-HANT、JA、KO、RU；「{0}」尚未支援。</sys:String>
     <sys:String x:Key="S.Error.OcrSwapTimeout">等待其他辨識結束以切換 OCR 模型時逾時。</sys:String>
     <sys:String x:Key="S.Error.OcrImageConvert">無法將影像轉換為 ONNX OCR 可讀格式。</sys:String>
     <sys:String x:Key="S.Error.OcrModelMissing">找不到 OCR 模型檔案：{0}</sys:String>
@@ -425,6 +425,7 @@
     <sys:String x:Key="S.Provider.Microsoft">Microsoft 翻譯</sys:String>
     <sys:String x:Key="S.Provider.DeepL">DeepL 翻譯</sys:String>
     <sys:String x:Key="S.Provider.DeepLHint">需至 DeepL 官方註冊並取得 API Key</sys:String>
+    <sys:String x:Key="S.Provider.Youdao">有道翻譯</sys:String>
     <sys:String x:Key="S.Provider.OpenAI">OpenAI</sys:String>
     <sys:String x:Key="S.Provider.OpenAIHint">支援 OpenAI API 格式，建議使用本地 LLM，可透過 Ollama 快速安裝與使用。</sys:String>
 
@@ -644,7 +645,7 @@
     <!-- ── 語言名稱 ── -->
     <!-- 語言選單裡的語言名稱。英文名由 LangItem.English 另外帶著，所以這裡只寫介面語言自己的說法。 -->
     <sys:String x:Key="S.Lang.Automatic">自動</sys:String>
-    <sys:String x:Key="S.Lang.AutomaticOcr">自動（中英日）</sys:String>
+    <sys:String x:Key="S.Lang.AutomaticOcr">自動（中英日俄）</sys:String>
     <sys:String x:Key="S.Lang.English">英文</sys:String>
     <sys:String x:Key="S.Lang.Japanese">日文</sys:String>
     <sys:String x:Key="S.Lang.Korean">韓文</sys:String>

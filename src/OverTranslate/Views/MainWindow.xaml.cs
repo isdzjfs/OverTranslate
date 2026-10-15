@@ -873,10 +873,11 @@ public partial class MainWindow : Window
         // observing the token belonging to the session it was started for.
         var cancellationToken = _sessionCts?.Token ?? CancellationToken.None;
         var settings = SettingsService.Instance.Current;
+        var provider = settings.Capture.GetProvider(settings.Provider);
         var selRect  = requestCaptureWindow?.Selection
             ?? new System.Windows.Rect(_lastSelPhysLeft, _lastSelPhysTop, _lastSelPhysWidth, _lastSelPhysHeight);
 
-        if (AppServices.Translation.RequiresApiKey && string.IsNullOrWhiteSpace(settings.ApiKey))
+        if (AppServices.Translation.ProviderRequiresApiKey(provider) && string.IsNullOrWhiteSpace(settings.ApiKey))
         {
             ShowNotice(
                 LocalizationService.Get("S.Main.MissingApiKeyTitle"),
@@ -924,19 +925,39 @@ public partial class MainWindow : Window
             using var workBitmap = ClonePixels(requestCaptureWindow.CroppedBitmap!);
 
             var stage = Stopwatch.GetTimestamp();
-            var recognition = await RecognizeCropAsync(
-                requestCaptureWindow,
-                workBitmap,
-                req.SourceLang,
-                req.IsVerticalText,
-                req.LayoutMode,
-                () => IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow),
-                cancellationToken, progressKey: "S.Main.Translating");
-            if (recognition is not (var recognizedBlocks, var ocrReused))
-                return;
-            ocrMs = ElapsedMs(stage);
+            bool ocrReused = false;
+            List<TranslatedBlock>? imageTranslations = null;
+            if (provider == Models.TranslationProvider.Youdao)
+            {
+                _overlayWindow?.ShowProcessing(
+                    _lastSelPhysLeft, _lastSelPhysTop, _lastSelPhysWidth, _lastSelPhysHeight,
+                    LocalizationService.Get("S.Main.Translating"));
+                var result = await AppServices.Translation.TranslateYoudaoScreenshotAsync(
+                    workBitmap, req.SourceLang, req.TargetLang, settings.Capture.YoudaoDeviceId,
+                    cancellationToken, req.IsVerticalText);
+                if (!IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow))
+                    return;
+                translateMs = ElapsedMs(stage);
+                _lastOcrBlocks = result.SourceBlocks;
+                imageTranslations = result.Blocks;
+            }
+            else
+            {
+                var recognition = await RecognizeCropAsync(
+                    requestCaptureWindow,
+                    workBitmap,
+                    req.SourceLang,
+                    req.IsVerticalText,
+                    req.LayoutMode,
+                    () => IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow),
+                    cancellationToken, progressKey: "S.Main.Translating");
+                if (recognition is not (var recognizedBlocks, var reused))
+                    return;
+                ocrReused = reused;
+                ocrMs = ElapsedMs(stage);
+                _lastOcrBlocks = recognizedBlocks;
+            }
 
-            _lastOcrBlocks = recognizedBlocks;
             if (_lastOcrBlocks.Count == 0)
             {
                 requestToolbar?.SetTranslationState(false);
@@ -960,9 +981,12 @@ public partial class MainWindow : Window
             _overlayWindow?.ShowOcrDebug(_lastOcrBlocks, _lastSelPhysLeft, _lastSelPhysTop);
 
             stage = Stopwatch.GetTimestamp();
-            var provider = settings.Provider;
             List<TranslatedBlock> translated;
-            if (provider is Models.TranslationProvider.Google or Models.TranslationProvider.GoogleChrome)
+            if (imageTranslations is not null)
+            {
+                translated = imageTranslations;
+            }
+            else if (provider is Models.TranslationProvider.Google or Models.TranslationProvider.GoogleChrome)
             {
                 var cached = await _captureTranslationCache.TranslateAsync(
                     _lastOcrBlocks, Models.TranslationProvider.Google, req.SourceLang, req.TargetLang,
@@ -984,7 +1008,7 @@ public partial class MainWindow : Window
             }
             if (!IsCurrentSelectionSession(requestSessionId, requestToolbar, requestCaptureWindow))
                 return;
-            translateMs = ElapsedMs(stage);
+            if (imageTranslations is null) translateMs = ElapsedMs(stage);
 
             _lastTranslatedBlocks = [.. translated];
 

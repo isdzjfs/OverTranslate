@@ -15,6 +15,7 @@ public class OcrServiceTests
     [InlineData("ZH-HANT")]
     [InlineData("JA")]
     [InlineData("KO")]
+    [InlineData("RU")]
     [InlineData("AUTO")]
     [InlineData("auto")]
     public void SupportedLanguages_AreRecognizedByRouter(string code)
@@ -45,6 +46,7 @@ public class OcrServiceTests
         // v6 holds no Hangul.
         Assert.Equal("cjk", OnnxOcrEngine.GetModelKeyForLanguage("EN"));
         Assert.Equal("korean", OnnxOcrEngine.GetModelKeyForLanguage("KO"));
+        Assert.Equal("cyrillic", OnnxOcrEngine.GetModelKeyForLanguage("RU"));
         Assert.Equal("cjk", OnnxOcrEngine.GetModelKeyForLanguage("JA"));
         Assert.Equal("cjk", OnnxOcrEngine.GetModelKeyForLanguage("ZH-HANT"));
         Assert.Equal("cjk", OnnxOcrEngine.GetModelKeyForLanguage("AUTO"));

@@ -72,7 +72,7 @@ public class LanguageDataTests
         var ocr = LanguageData.OcrSourceLanguages.Single(language =>
             language.Code == LanguageData.AutomaticSourceLanguage);
 
-        Assert.Equal("自動（中英日）", ocr.Name);
+        Assert.Equal("自動（中英日俄）", ocr.Name);
         Assert.Contains(LanguageData.SourceLanguages, language =>
             language.Code == LanguageData.AutomaticSourceLanguage);
         Assert.Equal("AUTO", LanguageData.GetValidOcrSourceCode("auto"));

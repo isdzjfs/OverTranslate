@@ -233,7 +233,8 @@ public partial class ToolbarWindow : Window
     }
 
     // Whether this page will go to the manga models; see MangaModelHintText.
-    private void RenderMangaHint() => MangaHint.Show(IsVerticalText, CurrentSourceLang);
+    private void RenderMangaHint() => MangaHint.Show(
+        IsVerticalText && ProviderBox.SelectedValue is not TranslationProvider.Youdao, CurrentSourceLang);
 
     private void TgtLangBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
@@ -244,6 +245,7 @@ public partial class ToolbarWindow : Window
     {
         if (ProviderBox.SelectedValue is not TranslationProvider provider) return;
         SaveProviderSelection(provider);
+        RenderMangaHint();
     }
 
     private void SwapBtn_Click(object sender, RoutedEventArgs e)
@@ -604,11 +606,12 @@ public partial class ToolbarWindow : Window
     {
         SrcLangBox.ItemsSource  = LanguageData.OcrSourceLanguages;
         TgtLangBox.ItemsSource  = LanguageData.TargetLanguages;
-        ProviderBox.ItemsSource = LanguageData.Providers;
+        ProviderBox.ItemsSource = LanguageData.CaptureProviders;
 
         SrcLangBox.SelectedValue  = LanguageData.GetValidOcrSourceCode(sourceLang);
         TgtLangBox.SelectedValue  = LanguageData.GetValidTargetCode(targetLang);
-        ProviderBox.SelectedValue = SettingsService.Instance.Current.Provider;
+        var settings = SettingsService.Instance.Current;
+        ProviderBox.SelectedValue = settings.Capture.GetProvider(settings.Provider);
         if (ProviderBox.SelectedValue == null) ProviderBox.SelectedIndex = 0;
     }
 
@@ -636,7 +639,7 @@ public partial class ToolbarWindow : Window
 
         SrcLangBox.Width  = ClosedWidth(SrcLangBox, LanguageData.OcrSourceLanguages.Select(l => l.ShortName));
         TgtLangBox.Width  = ClosedWidth(TgtLangBox, LanguageData.TargetLanguages.Select(l => l.ShortName));
-        ProviderBox.Width = ClosedWidth(ProviderBox, LanguageData.Providers.Select(p => p.ShortName));
+        ProviderBox.Width = ClosedWidth(ProviderBox, LanguageData.CaptureProviders.Select(p => p.ShortName));
 
         double ClosedWidth(System.Windows.Controls.ComboBox box, IEnumerable<string> labels)
         {
@@ -752,7 +755,8 @@ public partial class ToolbarWindow : Window
     private static void SaveProviderSelection(TranslationProvider provider)
     {
         var settings = SettingsService.Instance.Current;
-        settings.Provider = provider;
+        settings.Capture.ImageProvider = provider == TranslationProvider.Youdao ? provider : null;
+        if (provider != TranslationProvider.Youdao) settings.Provider = provider;
         SettingsService.Instance.Save();
     }
 

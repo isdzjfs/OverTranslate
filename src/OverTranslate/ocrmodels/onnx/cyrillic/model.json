@@ -1,0 +1,19 @@
+{
+  "name": "cyrillic_PP-OCRv5_rec_mobile",
+  "license": "Apache-2.0",
+  "upstream": "https://github.com/PaddlePaddle/PaddleOCR",
+  "distribution": "https://github.com/RapidAI/RapidOCR/blob/main/python/rapidocr/default_models.yaml",
+  "revision": "v3.10.0",
+  "files": [
+    {
+      "name": "rec.onnx",
+      "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv5/rec/cyrillic_PP-OCRv5_rec_mobile.onnx",
+      "sha256": "90f761b4bfcce0c8c561c0cb5c887b0971d3ec01c32164bdf7374a35b0982711"
+    },
+    {
+      "name": "dict.txt",
+      "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/paddle/PP-OCRv5/rec/cyrillic_PP-OCRv5_rec_mobile/ppocrv5_cyrillic_dict.txt",
+      "sha256": "db40aa52ceb112055be80c694afdf655d5d2c4f7873704524cc16a447ca913ba"
+    }
+  ]
+}
